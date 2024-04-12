@@ -5,10 +5,9 @@ The circular buffer can go back from the latest data to the past and from the ol
 
 The demonstration will continue to record temperature sensor data with elapsed time.
 
-``bash
-
-git submodule update --init --recursive
-
+```bash
+git submodule update --init
+cd lib/pico-sdk; git submodule update --init; cd ../../
 mkdir build; cd build
 cmake ..
 make
