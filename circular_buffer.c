@@ -8,18 +8,24 @@ void cb_restore(cb_t *cb) {
         return; // Error handling: Null pointer passed
     }
 
+    printf("Restore persistent circular buffer\n");
     uint64_t oldest_timestamp = 0xffffffffffffffff;
     uint64_t newest_timestamp = 0;
-    size_t latest_head = 0;
-    bool is_valid_entry_found = false;
-    size_t num_entries = cb->length;
+    cb->is_full = true;
+
+    void *entry = malloc(cb->item_size);
+    if (entry == NULL) {
+        printf("Out of memory\n");
+        return;
+    }
 
     for (size_t i = 0; i < cb->length; i++) {
         uint32_t address = cb->address + sizeof(MAGIC) + (i * cb->item_size);
-        uint8_t entry[cb->item_size];
         flash_read(address, entry, cb->item_size);
-        uint64_t timestamp = cb->get_timestamp((void *)entry);
+        uint64_t timestamp = cb->get_timestamp(entry);
+        printf("Restore entry: timestamp=%llu\n", timestamp);
         if (timestamp == 0xffffffffffffffff || timestamp == 0) {
+            cb->is_full = false;
             continue;
         }
         if (timestamp > newest_timestamp) {
@@ -31,6 +37,7 @@ void cb_restore(cb_t *cb) {
             cb->tail = i;
         }
     }
+    free(entry);
 
     if (oldest_timestamp == 0xffffffffffffffff) {
         cb->tail = 0;
@@ -43,19 +50,21 @@ void cb_create(cb_t *cb, uint32_t address, size_t length, size_t item_size,
         return;
     }
 
+    cb->get_timestamp = get_timestamp;
     cb->address = address;
     cb->length = length;
     cb->item_size = item_size;
     cb->head = 0;
     cb->tail = 0;
     cb->is_full = false;
+
     cb->_total_size = (( sizeof(MAGIC) + item_size * length + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
     if ((address % FLASH_SECTOR_SIZE) != 0) {
         cb->address = ((address / FLASH_SECTOR_SIZE) + 1) * FLASH_SECTOR_SIZE;
+
     }
     uint8_t buffer[FLASH_PAGE_SIZE] = {0};
-    ((uint32_t *)buffer)[0] = MAGIC;
-
+    memcpy(buffer, &MAGIC, sizeof(MAGIC));
     if (force_initialize) {
         flash_erase(cb->address, FLASH_SECTOR_SIZE);
         flash_prog(cb->address, buffer, FLASH_PAGE_SIZE);

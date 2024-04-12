@@ -14,11 +14,11 @@
 #include "flash.h"
 
 
-typedef uint64_t (*timestamp_extractor_t)(const void *entry);
+typedef uint64_t (*timestamp_extractor_t)(void *entry);
 
 typedef enum {
-    RB_CURSOR_DESCENDING,    // 降順
-    RB_CURSOR_ASCENDING    // 昇順
+    RB_CURSOR_DESCENDING,
+    RB_CURSOR_ASCENDING
 } cb_cursor_order_t;
 
 

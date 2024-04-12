@@ -8,9 +8,9 @@
 const uint32_t FLASH_BASE = 0x1F0000;
 
 int flash_read(uint32_t address, void *buffer, size_t size) {
-    uint8_t* p = (uint8_t*)(XIP_NOCACHE_NOALLOC_BASE + address);
+    uint8_t* p = (uint8_t *)(XIP_NOCACHE_NOALLOC_BASE + address);
     memcpy(buffer, p, size);
-    return 0; // Success
+    return 0;
 }
 
 int flash_prog(uint32_t address, const void *buffer, size_t size) {

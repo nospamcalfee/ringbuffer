@@ -17,8 +17,9 @@ typedef struct {
     float data;
 } cb_entry_t;
 
-static uint64_t extract_timestamp(const void *entry) {
-    const cb_entry_t *cb_entry = (const cb_entry_t *)entry;
+
+static uint64_t extract_timestamp(void *entry) {
+    cb_entry_t *cb_entry = (cb_entry_t *)entry;
     return cb_entry->timestamp;
 }
 
@@ -48,7 +49,6 @@ static void task_measure(cb_t *cb) {
 }
 
 static void task_test(cb_t *cb) {
-    static bool last_status = false;
     bool button = bb_get_bootsel_button();
     cb_entry_t entry;
     cb_cursor_t cursor;
@@ -67,8 +67,6 @@ static void task_test(cb_t *cb) {
             printf("timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
         }
     }
-
-    last_status = button;
 }
 
 int main(void) {
@@ -79,7 +77,7 @@ int main(void) {
     adc_set_temp_sensor_enabled(true);
     adc_select_input(4);
 
-    cb_create(&cb, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(cb_entry_t), extract_timestamp, true);
+    cb_create(&cb, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(cb_entry_t), &extract_timestamp, false);
     while (true) {
         task_measure(&cb);
         task_test(&cb);
