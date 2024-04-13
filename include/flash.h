@@ -1,3 +1,7 @@
+/*
+ * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
 #ifndef _FLASH_H_
 #define _FLASH_H_
 

@@ -1,3 +1,7 @@
+/*
+ * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
 #include "circular_buffer.h"
 
 
@@ -8,7 +12,6 @@ void cb_restore(cb_t *cb) {
         return; // Error handling: Null pointer passed
     }
 
-    printf("Restore persistent circular buffer\n");
     uint64_t oldest_timestamp = 0xffffffffffffffff;
     uint64_t newest_timestamp = 0;
     cb->is_full = true;
@@ -23,14 +26,13 @@ void cb_restore(cb_t *cb) {
         uint32_t address = cb->address + sizeof(MAGIC) + (i * cb->item_size);
         flash_read(address, entry, cb->item_size);
         uint64_t timestamp = cb->get_timestamp(entry);
-        printf("Restore entry: timestamp=%llu\n", timestamp);
         if (timestamp == 0xffffffffffffffff || timestamp == 0) {
             cb->is_full = false;
             continue;
         }
         if (timestamp > newest_timestamp) {
             newest_timestamp = timestamp;
-            cb->head = i;
+            cb->head = i < cb->length - 1 ? i + 1 : 0;
         }
         if (timestamp < oldest_timestamp) {
             oldest_timestamp = timestamp;
@@ -39,6 +41,9 @@ void cb_restore(cb_t *cb) {
     }
     free(entry);
 
+    if (cb->is_full) {
+        cb->tail = cb->head < cb->length - 1 ? cb->head + 1 : 0;
+    }
     if (oldest_timestamp == 0xffffffffffffffff) {
         cb->tail = 0;
     }

@@ -32,6 +32,16 @@ target_include_directories(circularbuffer
   ${CMAKE_CURRENT_LIST_DIR}/include
 )
 target_compile_options(circularbuffer PUBLIC -Werror -Wall -Wextra -Wnull-dereference)
-
 pico_enable_stdio_usb(circularbuffer 1)
 pico_add_extra_outputs(circularbuffer)
+
+
+find_program(OPENOCD openocd)
+if(OPENOCD)
+  add_custom_target(flash
+    COMMAND ${OPENOCD} -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c "adapter speed 5000" -c "program ${CMAKE_PROJECT_NAME}.elf verify reset exit"
+    DEPENDS ${CMAKE_PROJECT_NAME}
+  )
+
+  add_subdirectory(tests EXCLUDE_FROM_ALL)
+endif()

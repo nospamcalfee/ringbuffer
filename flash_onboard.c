@@ -1,3 +1,7 @@
+/*
+ * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
 #include <string.h>
 #include <hardware/flash.h>
 #include <hardware/sync.h>
