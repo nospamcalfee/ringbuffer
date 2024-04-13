@@ -52,7 +52,7 @@ static void task_measure(cb_t *cb) {
     cb_append(cb, &entry, sizeof(entry));
 }
 
-static void task_test(cb_t *cb) {
+static void task_report(cb_t *cb) {
     bool button = bb_get_bootsel_button();
     cb_entry_t entry;
     cb_cursor_t cursor;
@@ -84,7 +84,7 @@ int main(void) {
     cb_create(&cb, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(cb_entry_t), &extract_timestamp, false);
     while (true) {
         task_measure(&cb);
-        task_test(&cb);
+        task_report(&cb);
         sleep_ms(1000);
     }
 }
