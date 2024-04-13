@@ -24,6 +24,7 @@ target_include_directories(tests
 )
 target_compile_options(tests PRIVATE -Werror -Wall -Wextra -Wnull-dereference)
 pico_add_extra_outputs(tests)
+pico_enable_stdio_usb(tests 1)
 
 
 if(OPENOCD)
