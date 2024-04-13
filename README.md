@@ -29,7 +29,7 @@ The tests directory contains code to verify the API's behavior. After building a
 make tests
 ```
 
-To run the tests, transfer the tests/tests.uf2 file to your Pico. For a more comprehensive debugging experience, connect the [Raspberry Pi Debug Probe](https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.htm) to the SWD Debug and UART Serial interfaces of the Pico. Use the following command to install and run the tests:
+To run the tests, transfer the tests/tests.uf2 file to your Pico. For a more comprehensive debugging experience, connect the [Raspberry Pi Debug Probe](https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.html) to the SWD Debug and UART Serial interfaces of the Pico. Use the following command to install and run the tests:
 
 ```
 make run_tests
