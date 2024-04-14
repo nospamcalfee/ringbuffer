@@ -32,6 +32,8 @@ target_include_directories(circularbuffer
   ${CMAKE_CURRENT_LIST_DIR}/include
 )
 target_compile_options(circularbuffer PUBLIC -Werror -Wall -Wextra -Wnull-dereference)
+string(APPEND CMAKE_EXE_LINKER_FLAGS "-Wl,--print-memory-usage")
+
 pico_enable_stdio_usb(circularbuffer 1)
 pico_add_extra_outputs(circularbuffer)
 
