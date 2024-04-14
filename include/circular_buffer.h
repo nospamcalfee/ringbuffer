@@ -34,7 +34,9 @@ typedef struct {
     size_t item_size;
     size_t head;
     size_t tail;
-    size_t _total_size;
+    size_t items_per_page;
+    size_t pages_per_sector;
+    size_t total_sectors;
     bool is_full;
     timestamp_extractor_t get_timestamp;
 } cb_t;
@@ -47,12 +49,11 @@ typedef struct {
 } cb_cursor_t;
 
 // Declaration of functions related to the ring buffer
-void cb_create(cb_t *cb, uint32_t address, size_t length, size_t item_size,
-               timestamp_extractor_t get_timestamp, bool force_initialize);
-
+int cb_create(cb_t *cb, uint32_t address, size_t length, size_t item_size,
+              timestamp_extractor_t get_timestamp, bool force_initialize);
+void cb_append(cb_t *cb, const void *data, size_t size);
 void cb_open_cursor(cb_t *cb, cb_cursor_t *cursor, cb_cursor_order_t order);
 bool cb_get_next(cb_cursor_t *cursor, void *data);
 void cb_close_cursor(cb_cursor_t *cursor);
-void cb_append(cb_t *cb, const void *data, size_t size);
 
 #endif

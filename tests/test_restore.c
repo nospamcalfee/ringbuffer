@@ -14,7 +14,7 @@ static uint64_t get_timestamp(void *obj) {
 }
 
 static void setup(void) {
-    const size_t erase_size = ((CIRCULAR_BUFFER_LENGTH * sizeof(test_create_item_t) + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE) * FLASH_SECTOR_SIZE;
+    const size_t erase_size = 4096 * 2;
     flash_erase(FLASH_BASE, erase_size);
 }
 
@@ -36,6 +36,7 @@ static void test_restore_1(void) {
     // shutdown and restart
 
     cb_create(&cb_after, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(test_create_item_t), &get_timestamp, false);
+
     assert(cb_after.head == 1);
     assert(cb_after.tail == 0);
     assert(cb_after.is_full == false);
@@ -50,7 +51,7 @@ static void test_restore_full(void) {
     setup();
 
     cb_create(&cb_first, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(test_create_item_t), &get_timestamp, true);
-    for (int i = 0; i < CIRCULAR_BUFFER_LENGTH; i++) {
+    for (int i = 0; i < CIRCULAR_BUFFER_LENGTH + 8; i++) {
         item.timestamp = i + 1;
         item.value = 0x1234 + i;
         cb_append(&cb_first, &item, sizeof(item));
@@ -59,8 +60,9 @@ static void test_restore_full(void) {
     // shutdown and restart
 
     cb_create(&cb_after, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(test_create_item_t), &get_timestamp, false);
-    assert(cb_after.head == 0);
-    assert(cb_after.tail == 1);
+
+    assert(cb_after.head == 18);
+    assert(cb_after.tail == 8);
     assert(cb_after.is_full == true);
 
     cleanup();
