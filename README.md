@@ -4,10 +4,11 @@ This project demonstrates the use of a circular buffer on the Raspberry Pi Pico'
 
 The demonstration will continue to record temperature sensor data with elapsed time.
 
+## Gap-Equipped Circular Buffer Overview
 
-## Important Limitations
+This circular buffer is designed for flash memory and includes a built-in gap. The gap maintains a constant unused area between the buffer's start and end, set to at least the size of the flash memory's erase unit (sector size). This design minimizes erase cycles and wear on memory cells, thereby extending the lifespan of the flash memory.
 
-This implementation persistently writes to and erases the same areas of flash memory to store data. As a result, if power is lost before the flash memory area has been erased and rewritten during the addition of new data, data loss may occur. This limitation is important to consider when using the data logger in environments where power supply may be unstable.
+This structure is particularly effective for storing log data in IoT devices. Users only need to specify the size and number of entries; the buffer automatically calculates the gap size to optimize flash memory usage.
 
 ## Build and Install
 

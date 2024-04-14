@@ -33,6 +33,7 @@ static void test_append1(void) {
 
     item.timestamp = 1;
     item.value = 0x1234;
+
     cb_append(&cb, &item, sizeof(item));
     assert(cb.head == 1);
     assert(cb.tail == 0);
@@ -68,14 +69,13 @@ static void test_append_circular(void) {
     setup();
 
     cb_create(&cb, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(test_create_item_t), &get_timestamp, true);
-    for (int i = 0; i < CIRCULAR_BUFFER_LENGTH; i++) {
+    for (int i = 0; i < 512 - 1; i++) {
         item.timestamp = 1 + i;
         item.value = 0x1234 + i;
         cb_append(&cb, &item, sizeof(item));
     }
-
-    assert(cb.head == 0);
-    assert(cb.tail == 1);
+    assert(cb.head == 512 - 1);
+    assert(cb.tail == 512 - 1 - CIRCULAR_BUFFER_LENGTH);
     assert(cb.is_full == true);
 
     cleanup();
@@ -95,8 +95,7 @@ static void test_persistent_value(void) {
     }
 
     // Reads values from flash memory and compares them
-    const uint32_t MAGIC_HEADER;
-    test_create_item_t *flash = (test_create_item_t *)(XIP_BASE + FLASH_BASE + sizeof(MAGIC_HEADER));
+    test_create_item_t *flash = (test_create_item_t *)(XIP_BASE + FLASH_BASE);
     for (int i = 0; i < CIRCULAR_BUFFER_LENGTH - 1; i++) {
         assert(flash[i].timestamp == (uint64_t)(1 + i));
         assert(flash[i].value == 0x1234 + i);
