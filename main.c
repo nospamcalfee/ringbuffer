@@ -82,6 +82,7 @@ int main(void) {
     adc_select_input(4);
 
     cb_create(&cb, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(cb_entry_t), &extract_timestamp, false);
+    printf("persistent area, len %lu %lu", __PERSISTENT_TABLE, __PERSISTENT_LEN);
     while (true) {
         task_measure(&cb);
         task_report(&cb);

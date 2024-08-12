@@ -5,7 +5,9 @@ if(NOT PICO_SDK_PATH)
 endif()
 include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
-project(circularbuffer C CXX ASM)
+set(PROGRAM_NAME circularbuffer)
+
+project(${PROGRAM_NAME} C CXX ASM)
 
 set(PICO_BOARD pico_w)
 set(FAMILY rp2040)
@@ -14,12 +16,12 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-add_executable(circularbuffer
+add_executable(${PROGRAM_NAME}
   main.c
   circular_buffer.c
   flash_onboard.c
 )
-target_link_libraries(circularbuffer
+target_link_libraries(${PROGRAM_NAME}
   hardware_adc
   hardware_flash
   hardware_rtc
@@ -27,15 +29,17 @@ target_link_libraries(circularbuffer
   pico_stdlib
 )
 
-target_include_directories(circularbuffer
+pico_set_linker_script(${PROGRAM_NAME} ${CMAKE_SOURCE_DIR}/memmap_custom.ld)
+
+target_include_directories(${PROGRAM_NAME}
   PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/include
 )
-target_compile_options(circularbuffer PUBLIC -Werror -Wall -Wextra -Wnull-dereference)
+target_compile_options(${PROGRAM_NAME} PUBLIC -Werror -Wall -Wextra -Wnull-dereference)
 string(APPEND CMAKE_EXE_LINKER_FLAGS "-Wl,--print-memory-usage")
 
-pico_enable_stdio_usb(circularbuffer 1)
-pico_add_extra_outputs(circularbuffer)
+pico_enable_stdio_usb(${PROGRAM_NAME} 1)
+pico_add_extra_outputs(${PROGRAM_NAME})
 
 
 find_program(OPENOCD openocd)
