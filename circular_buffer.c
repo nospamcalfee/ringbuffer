@@ -234,7 +234,7 @@ rb_errors_t is_crc_good(rb_header *rbh) {
     return RB_OK; //for now no crc check
 }
 rb_errors_t is_header_good(rb_header *rbh) {
-    if (rbh->id == 0xff && rbh->crc == 0xff && rbh->len == 0xffff) {
+    if (rbh->id == 0xff && rbh->crc == 0xff && rbh->len == RB_MAX_LEN_VALUE) {
         return RB_BLANK_HDR;
     }
     if (rbh->id == 0xff || rbh->len == 0) {
@@ -242,32 +242,50 @@ rb_errors_t is_header_good(rb_header *rbh) {
     }
     return is_crc_good(rbh);
 }
+//return sector number of offset
+uint32_t cur_sect(uint32_t offset) {
+    return offset / FLASH_SECTOR_SIZE * FLASH_SECTOR_SIZE;
+}
+//return offset in sector
+uint32_t off_sect(uint32_t offs){
+    return offs & (FLASH_SECTOR_SIZE - 1);
+}
+
 /*
  Increment offset to next ring address. If it steps out of a sector, wrap to
  next sector or around to first sector if necessary. If it steps within a
- sector but there isnt room for at least a header and one data byte, skip
- to next sector.
+ sector but there isnt room for at least a header and one data byte, skip to
+ next sector. irregardless of len argument the max it will increment is to the
+ next sector.
 */
-uint32_t rb_incr(uint32_t oldlen, uint32_t len){
+uint32_t rb_incr(uint32_t oldlen, uint32_t len, uint32_t maxlen){
     uint32_t nextaddr;
     if (len > FLASH_SECTOR_SIZE) {
-        //take a really big step, skipping to next sector
-        nextaddr = oldlen + FLASH_SECTOR_SIZE;
-    } else if (oldlen + len > (FLASH_SECTOR_SIZE - (sizeof(rb_header) + 1) )) {
-        nextaddr = oldlen + ((len + FLASH_SECTOR_SIZE) & (FLASH_SECTOR_SIZE - 1));
+        //take a really big step, skipping to next sector header
+        nextaddr = cur_sect(oldlen) + FLASH_SECTOR_SIZE;
+    } else if (off_sect(oldlen) + len > (FLASH_SECTOR_SIZE - (sizeof(rb_header) + 1) )) {
+        //doesnt fit in this sector go to next sector
+        nextaddr = cur_sect(oldlen) + FLASH_SECTOR_SIZE;
     } else {
+        //fits in this sector, get new offset
         nextaddr = oldlen + len;
     }
+    if (nextaddr > maxlen) {
+        // wrap back to start of ring
+        nextaddr = 0;
+    }
+
     return nextaddr;
 }
 /* 
 
-find next writeable flash offset. start at first flash sector, looking for
-valid data, update rb ring ptrs. Return error code, side effect, update ring
-pointers.
+find next writeable flash offset. start at first flash sector, looking for valid
+data, update rb ring ptrs. Return error code, side effect, update ring
+pointers. Writes will always leave at least room for one more hdr and will fail
+if there is not enough room.
 
 */
-rb_errors_t rb_findnext(rb_t *rb) {
+rb_errors_t rb_findnext_writeable(rb_t *rb) {
     rb_header hdr;
     rb_errors_t hdr_res = RB_BAD_HDR;
     if (rb == NULL ) {
@@ -292,29 +310,70 @@ rb_errors_t rb_findnext(rb_t *rb) {
         default:
             break;
         }
-        rb->next = rb_incr(rb->next, hdr.len); //keep looking for end of rb
+        //found a good header, use it to skip ahead
+        //keep looking for end of rb
+        rb->next = rb_incr(rb->next, hdr.len, rb->number_of_bytes);
+        if (rb->next & (FLASH_SECTOR_SIZE - 1)) {
+            // if we wrap to next sector, fixup to match required sector header
+        }
     } while (1);
+    return hdr_res;
+}
+/*
+ The ring will start in the first sector with a good header. If all sectors are
+ blank, then it will start in the first sector.
+*/
+rb_errors_t rb_find_ring_start(rb_t *rb) {
+    rb_header hdr;
+    rb_errors_t hdr_res = RB_BAD_HDR;
+    if (rb == NULL ) {
+        return RB_BAD_CALLER_DATA; // Error handling: Null pointer passed
+    }
+    rb->next = 0; //start on first sector
+    do {
+        flash_read(rb->base_address + rb->next, &hdr, sizeof(hdr));
+        hdr_res = is_header_good(&hdr);
+        switch (hdr_res) {
+        case RB_OK: //legit hdr, update ptrs, start here
+            return hdr_res;
+        case RB_BLANK_HDR: //header is erased, keep looking?
+            break;
+        default:
+            break;
+        }
+        rb->next += FLASH_SECTOR_SIZE;
+    } while (rb->next < rb->number_of_bytes);
+    //we have searched the ring, no hdr found, so start at ring start
+    rb->next = 0;
     return hdr_res;
 }
 /* create a new variable sized ringbuffer, maybe initing it too */
 rb_errors_t rb_create(rb_t *rb, uint32_t base_address, 
                       size_t number_of_sectors, bool force_initialize) {
     rb_errors_t hdr_err = RB_BAD_HDR;
+#ifdef PICO_FLASH_SIZE_BYTES
+    if (number_of_sectors > PICO_FLASH_SIZE_BYTES / FLASH_SECTOR_SIZE) {
+        return RB_BAD_CALLER_DATA;
+    }
+#endif
     if (rb == NULL || number_of_sectors < 1) {
         return RB_BAD_CALLER_DATA;
     }
-    rb->base_address = base_address; //offset in flash, not system address
-    rb->number_of_sectors = number_of_sectors;
+     //offset in flash, not system address
+    rb->base_address = base_address & (XIP_BASE-1);
+    rb->number_of_bytes = number_of_sectors * FLASH_SECTOR_SIZE;
     rb->next = 0;
     rb->is_full = false;
 
     if (force_initialize) {
-        flash_erase(rb->base_address, rb->number_of_sectors * FLASH_SECTOR_SIZE);
+        flash_erase(rb->base_address, rb->number_of_bytes);
     } else {
-        //request was to continue in rb as exists.
-        //it is up to the user to deal with rb errors
-        hdr_err = rb_findnext(rb);
+        //request was to continue in rb as exists in flash.
+        hdr_err = rb_find_ring_start(rb);
+        if (hdr_err == RB_OK || hdr_err == RB_BLANK_HDR) {
+            hdr_err = rb_findnext_writeable(rb);
+        }
     }
-
+    //it is up to the user to deal with rb errors
     return hdr_err;
 }

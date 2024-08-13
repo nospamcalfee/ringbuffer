@@ -52,6 +52,8 @@ typedef struct {
     uint16_t len;  //blob size - used to find next storage item.
 } rb_header;
 
+#define RB_MAX_LEN_VALUE 0xffff
+
 typedef enum {
     RB_CURSOR_DESCENDING,
     RB_CURSOR_ASCENDING
@@ -91,7 +93,7 @@ void cb_close_cursor(cb_cursor_t *cursor);
 /* new variable size ring buffer */
 typedef struct {
     size_t base_address; //offset in flash, not system address
-    size_t number_of_sectors;
+    size_t number_of_bytes;
     size_t next; //working pointer into flash ring
     bool is_full;
 } rb_t;
