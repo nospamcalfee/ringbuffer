@@ -22,7 +22,7 @@ typedef struct {
 } cb_entry_t;
 
 
-static uint64_t extract_timestamp(void *entry) {
+uint64_t extract_timestamp(void *entry) {
     cb_entry_t *cb_entry = (cb_entry_t *)entry;
     return cb_entry->timestamp;
 }
@@ -43,51 +43,71 @@ float read_onboard_temperature(const char unit) {
     return -1.0f;
 }
 
-static void task_measure(cb_t *cb) {
+static rb_errors_t task_measure(rb_t *rb) {
     uint64_t timestamp = time_us_64();
     float temperature = read_onboard_temperature(TEMPERATURE_UNITS);
     cb_entry_t entry;
     entry.timestamp = timestamp;
     entry.data = temperature;
-    cb_append(cb, &entry, sizeof(entry));
+    printf("writing timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
+    return rb_append(rb, 0x7, &entry, sizeof(entry));
 }
 
-static void task_report(cb_t *cb) {
-    bool button = bb_get_bootsel_button();
-    cb_entry_t entry;
-    cb_cursor_t cursor;
+static void task_report(rb_t *rb) {
+    (void) rb;
+    // bool button = bb_get_bootsel_button();
+    // rb_entry_t entry;
+    // rb_cursor_t cursor;
 
-    if (button) {  // Push BOOTSEL button
-        printf("--------DESCENDING TIME SERIES\n");
-        cb_open_cursor(cb, &cursor, RB_CURSOR_DESCENDING);
-        while (cb_get_next(&cursor, &entry)) {
-            printf("timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
-        }
-    } else { // Release BOOTSEL button
-        printf("--------ASCENDING TIME SERIES\n");
-        cb_open_cursor(cb, &cursor, RB_CURSOR_ASCENDING);
+    // if (button) {  // Push BOOTSEL button
+    //     printf("--------DESCENDING TIME SERIES\n");
+    //     cb_open_cursor(cb, &cursor, RB_CURSOR_DESCENDING);
+    //     while (cb_get_next(&cursor, &entry)) {
+    //         printf("timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
+    //     }
+    // } else { // Release BOOTSEL button
+    //     printf("--------ASCENDING TIME SERIES\n");
+    //     cb_open_cursor(cb, &cursor, RB_CURSOR_ASCENDING);
 
-        while (cb_get_next(&cursor, &entry)) {
-            printf("timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
-        }
-    }
+    //     while (cb_get_next(&cursor, &entry)) {
+    //         printf("timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
+    //     }
+    // }
+    return;
 }
+static rb_t rb; //keep the buffer off the stack
 
 int main(void) {
-    cb_t cb;
-    rb_t rb;
 
     stdio_init_all();
     adc_init();
     adc_set_temp_sensor_enabled(true);
     adc_select_input(4);
 
-    cb_create(&cb, FLASH_BASE, CIRCULAR_BUFFER_LENGTH, sizeof(cb_entry_t), &extract_timestamp, false);
-    rb_create(&rb, __PERSISTENT_TABLE, 1, false);
-    printf("linker defined persistent area, len 0x%lx 0x%lx", __PERSISTENT_TABLE, __PERSISTENT_LEN);
+    rb_errors_t err = rb_create(&rb, __PERSISTENT_TABLE, 1, false);
+    if (!(err == RB_OK || err == RB_BLANK_HDR)) {
+        printf("starting flash error %d, reiniting\n", err);
+        err = rb_create(&rb, __PERSISTENT_TABLE, 1, true); //start over
+        if (err != RB_OK) {
+            //init failed, bail
+            printf("starting flash error %d, quitting\n", err);
+            exit(0);
+        }
+    }
+    printf("linker defined persistent area, len 0x%lx 0x%lx, st=%d\n", __PERSISTENT_TABLE, __PERSISTENT_LEN, err);
     while (true) {
-        task_measure(&cb);
-        task_report(&cb);
+        err = task_measure(&rb);
+        if (err != RB_OK) {
+            printf("flash error %d, reiniting rolling over to first sector\n", err);
+            err = rb_create(&rb, __PERSISTENT_TABLE, 1, true); //start over
+            if (err != RB_OK) {
+                //init failed, bail
+                printf("flash error %d, quitting\n", err);
+                exit(0);
+            }
+            //exit(0); //stop after writing full buffers
+        }
+        task_report(&rb);
         sleep_ms(1000);
     }
 }

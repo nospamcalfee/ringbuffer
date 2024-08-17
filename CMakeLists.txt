@@ -17,7 +17,7 @@ set(CMAKE_CXX_STANDARD 17)
 pico_sdk_init()
 
 add_executable(${PROGRAM_NAME}
-  main.c
+  rbmain.c
   circular_buffer.c
   flash_onboard.c
 )
