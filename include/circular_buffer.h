@@ -81,6 +81,7 @@ typedef struct {
     uint8_t crc;   //validity check of rb_header
 } rb_header;
 
+#define HEADER_SIZE (sizeof(rb_header))
 //get highest legal value for len in rb_header
 #define RB_MAX_LEN_VALUE ((uint16_t) -1)
 //given a binary power, return the modulo2 mask of its value
@@ -117,12 +118,17 @@ typedef enum {
     RB_BAD_SECTOR,
     RB_BLANK_HDR,
     RB_BAD_HDR,
-    RB_WRAPPED_SECTOR_USED,
+    RB_WRAPPED_SECTOR_USED = 5,
+    RB_HDR_LOOP,
+    RB_HDR_ID_NOT_FOUND,
+    RB_FULL,
 } rb_errors_t;
 
-rb_errors_t rb_create(rb_t *rb, uint32_t address, size_t sectors, bool force_initialize);
+rb_errors_t rb_create(rb_t *rb, uint32_t base_address, 
+                      size_t number_of_sectors, bool force_initialize,
+                      bool write_buffer);
 rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size);
-
+rb_errors_t rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size);
 //get defines from the .ld link map
 extern char __flash_persistent_start;
 extern char __flash_persistent_length;

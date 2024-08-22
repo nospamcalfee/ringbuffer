@@ -14,6 +14,8 @@
 #define TEMPERATURE_UNITS 'C'
 #define CIRCULAR_BUFFER_LENGTH  20
 
+int hexdump(FILE *fd, void const *ptr, size_t length, int linelen, int split);
+
 extern const uint32_t FLASH_BASE;
 
 typedef struct {
@@ -43,63 +45,64 @@ float read_onboard_temperature(const char unit) {
     return -1.0f;
 }
 
-static rb_errors_t task_measure(rb_t *rb) {
+static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
     uint64_t timestamp = time_us_64();
     float temperature = read_onboard_temperature(TEMPERATURE_UNITS);
     cb_entry_t entry;
     entry.timestamp = timestamp;
     entry.data = temperature;
-    printf("writing timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
-    return rb_append(rb, 0x7, &entry, sizeof(entry));
+    printf("writing timestamp=%.1f,temperature=%.2f size=0x%lx\n", (double)entry.timestamp / 1000000, entry.data, size);
+    rb_errors_t err = rb_append(rb, 0x7, data, size);
+    if (err != RB_OK) {
+        printf("some write failure %d\n", err);
+    }
+    return err;
 }
 
-static void task_report(rb_t *rb) {
-    (void) rb;
-    // bool button = bb_get_bootsel_button();
-    // rb_entry_t entry;
-    // rb_cursor_t cursor;
-
-    // if (button) {  // Push BOOTSEL button
-    //     printf("--------DESCENDING TIME SERIES\n");
-    //     cb_open_cursor(cb, &cursor, RB_CURSOR_DESCENDING);
-    //     while (cb_get_next(&cursor, &entry)) {
-    //         printf("timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
-    //     }
-    // } else { // Release BOOTSEL button
-    //     printf("--------ASCENDING TIME SERIES\n");
-    //     cb_open_cursor(cb, &cursor, RB_CURSOR_ASCENDING);
-
-    //     while (cb_get_next(&cursor, &entry)) {
-    //         printf("timestamp=%.1f,temperature=%.2f\n", (double)entry.timestamp / 1000000, entry.data);
-    //     }
-    // }
-    return;
+rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
+    rb_errors_t err;
+    rb->next = 0; //start at first entry
+    do {
+        err = rb_read(rb, 7, data, size);
+        if (err == RB_OK) {
+            hexdump(stdout, data, size, 16, 8);
+        } else {
+            printf("some read failure, stop reading %d\n", err);
+        }
+    } while (err == RB_OK);
+    return err;
 }
-static rb_t rb; //keep the buffer off the stack
+static rb_t write_rb; //keep the buffer off the stack
+static rb_t read_rb; //keep the buffer off the stack
+static uint8_t workdata[4096]; //local data for transfering
 
 int main(void) {
-
+    int loopcount = 0;
     stdio_init_all();
     adc_init();
     adc_set_temp_sensor_enabled(true);
     adc_select_input(4);
 
-    rb_errors_t err = rb_create(&rb, __PERSISTENT_TABLE, 1, false);
+    rb_errors_t err = rb_create(&write_rb, __PERSISTENT_TABLE, 1, false, true);
     if (!(err == RB_OK || err == RB_BLANK_HDR)) {
         printf("starting flash error %d, reiniting\n", err);
-        err = rb_create(&rb, __PERSISTENT_TABLE, 1, true); //start over
+        err = rb_create(&write_rb, __PERSISTENT_TABLE, 1, true, true); //start over
         if (err != RB_OK) {
             //init failed, bail
             printf("starting flash error %d, quitting\n", err);
             exit(0);
         }
     }
-    printf("linker defined persistent area, len 0x%lx 0x%lx, st=%d\n", __PERSISTENT_TABLE, __PERSISTENT_LEN, err);
+    printf("linker defined persistent area 0x%lx, len 0x%lx st=%d\n", __PERSISTENT_TABLE, __PERSISTENT_LEN, err);
     while (true) {
-        err = task_measure(&rb);
-        if (err != RB_OK) {
+        for (uint32_t i = 0; i < sizeof(workdata); i++) {
+            workdata[i] = (uint8_t) i;
+        }
+        err = writer(&write_rb, workdata, 252);
+        if (err != RB_OK && loopcount++ > 60) {
+            loopcount = 0;
             printf("flash error %d, reiniting rolling over to first sector\n", err);
-            err = rb_create(&rb, __PERSISTENT_TABLE, 1, true); //start over
+            err = rb_create(&write_rb, __PERSISTENT_TABLE, 1, true, true); //start over
             if (err != RB_OK) {
                 //init failed, bail
                 printf("flash error %d, quitting\n", err);
@@ -107,7 +110,17 @@ int main(void) {
             }
             //exit(0); //stop after writing full buffers
         }
-        task_report(&rb);
+        if (read_rb.number_of_bytes == 0 || loopcount == 0) {
+            //first time through, or write reinited, init the read buffer
+            err = rb_create(&read_rb, __PERSISTENT_TABLE, 1, false, false); //start over
+            if (err != RB_OK && err != RB_BLANK_HDR) {
+                //some failure, maybe need to wait for writer task?
+                printf("some read init failure %d, quitting\n", err);
+                exit(0);
+            }
+        } else {
+            // err = reader(&write_rb, workdata, 252);             
+        }
         sleep_ms(1000);
     }
 }

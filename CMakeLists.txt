@@ -20,6 +20,7 @@ add_executable(${PROGRAM_NAME}
   rbmain.c
   circular_buffer.c
   flash_onboard.c
+  hexdump.c
 )
 target_link_libraries(${PROGRAM_NAME}
   hardware_adc
@@ -35,7 +36,7 @@ target_include_directories(${PROGRAM_NAME}
   PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/include
 )
-target_compile_options(${PROGRAM_NAME} PUBLIC -Werror -Wall -Wextra -Wnull-dereference -g -O0)
+target_compile_options(${PROGRAM_NAME} PUBLIC -Werror -Wall -Wextra -Wnull-dereference -ggdb3 -O0)
 string(APPEND CMAKE_EXE_LINKER_FLAGS "-Wl,--print-memory-usage")
 
 pico_enable_stdio_usb(${PROGRAM_NAME} 1)
