@@ -265,7 +265,7 @@ rb_errors_t make_header(rb_header *rbh, uint8_t id, uint32_t size) {
     rbh->id = id;
     rbh->len = size;
     rbh->crc = crc_init();
-    rbh->crc = crc_update(rbh->crc, &rbh, 3);
+    rbh->crc = crc_update(rbh->crc, rbh, 3);
     rbh->crc = crc_finalize(rbh->crc);
     return RB_OK;
 }
@@ -343,7 +343,7 @@ rb_errors_t rb_findnext_writeable(rb_t *rb) {
     do {
         if (MOD_SECTOR(rb->next) > FLASH_SECTOR_SIZE - sizeof(hdr) - 1) {
             //skip last few bytes of sector
-            rb->next += MOD_SECTOR(rb->next) - FLASH_SECTOR_SIZE - sizeof(hdr) - 1;
+            rb->next +=  FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next);
             if (rb->next >= __PERSISTENT_LEN) {
                 rb->next = 0; //wrap to first sector allocated
             }

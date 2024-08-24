@@ -78,7 +78,8 @@ static rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
 static rb_t write_rb; //keep the buffer off the stack
 static rb_t read_rb; //keep the buffer off the stack
 static uint8_t workdata[4096]; //local data for transfering
-
+// #define TEST_SIZE (4096-4-4)
+#define TEST_SIZE (256)
 int main(void) {
     int loopcount = 0;
     stdio_init_all();
@@ -101,7 +102,7 @@ int main(void) {
         for (uint32_t i = 0; i < sizeof(workdata); i++) {
             workdata[i] = (uint8_t) i;
         }
-        err = writer(&write_rb, workdata, 252);
+        err = writer(&write_rb, workdata, TEST_SIZE);
         if (err != RB_OK && loopcount++ > 60) {
             loopcount = 0;
             printf("flash error %d, reiniting rolling over to first sector\n", err);
@@ -122,7 +123,7 @@ int main(void) {
                 exit(0);
             }
         } else {
-            err = reader(&read_rb, workdata, 252);    
+            err = reader(&read_rb, workdata, TEST_SIZE);    
             if (err != RB_OK) read_rb.next = 0;         
         }
         sleep_ms(1000);

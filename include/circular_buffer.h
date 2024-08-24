@@ -47,6 +47,19 @@ typedef uint64_t (*timestamp_extractor_t)(void *entry);
  Newest data is in the first sector with incomplete usage by tracing headers
  and lens in rb_header.
 
+ Reads are kind of tricky. It is assumed that the user will (for any id) read the
+ same amount as was written. It is generally intended that the ring buffering
+ handling be invisible from the caller. He writes a bunch of bytes for an id
+ and reads it back later. Flash pages, sectors and header gaps are not the
+ applications problem.
+
+ FIXME - as an improvement any size reads should be attempted. If the read
+ request is too short, the buffer pointers should skip to the end of the id
+ data. If the read request is too long (like for some utility program that did
+ not actually write the data), the entire data storage should be read and the
+ actual length of the read returned. This means the read should return negative
+ numbers for errors and the actual length read on a successful read return.
+
 */
 
 typedef enum {
