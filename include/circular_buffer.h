@@ -36,10 +36,13 @@ typedef uint64_t (*timestamp_extractor_t)(void *entry);
  system startup
 
  Rings start at the lowest sector allocated with a rb_header, userdata etc.
+ Users can write from 1 byte to 64K-4 bytes long. If less than 64K is allocated
+ in flash sector space, only that much less 4 is the maximum write size.
  Userdata can span over a sector, each new sector entered will be checked for
- blank and erased if requested. Or the save will fail before starting. The
- new sector will have a rb_header with an adjusted len at the start. This
- preserves the ring when old data is erased, but old data may lose its head.
+ blank and erased if requested. Or the save will fail before starting. The new
+ sector will have a rb_header with an adjusted len at the start. This preserves
+ the ring when old data is erased, but old data may lose its head if it spans a
+ sector.
 
  Newest data is in the first sector with incomplete usage by tracing headers
  and lens in rb_header.
@@ -84,6 +87,8 @@ typedef struct {
 #define HEADER_SIZE (sizeof(rb_header))
 //get highest legal value for len in rb_header
 #define RB_MAX_LEN_VALUE ((uint16_t) -1)
+#define MAX_SECTS (__PERSISTENT_LEN / FLASH_SECTOR_SIZE)
+
 //given a binary power, return the modulo2 mask of its value
 #define MOD_MASK(a) (a - 1)
 #define MOD_SECTOR(a) (a & MOD_MASK(FLASH_SECTOR_SIZE))
@@ -109,7 +114,6 @@ typedef struct {
     uint32_t number_of_bytes;
     uint32_t next; //working pointer into flash ring 0<=next<FLASH_SECTOR_SIZE
     uint8_t rb_page[FLASH_PAGE_SIZE]; //temporary page buffer.
-    bool is_full;
 } rb_t;
 
 typedef enum {

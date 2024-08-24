@@ -241,14 +241,18 @@ crc_t crc_update(crc_t crc, const void *data, size_t data_len)
 }
 
 rb_errors_t is_crc_good(rb_header *rbh) {
-    (void) rbh;
+    crc_t crc = crc_init();
+    crc = crc_update(crc, rbh, 3);
+    crc = crc_finalize(crc);
+    //remove any used flags from crc check
+    if ((rbh->crc & ~RB_HEADER_SPLIT) != crc) return RB_BAD_HDR;
     return RB_OK; //for now no crc check
 }
 rb_errors_t is_header_good(rb_header *rbh) {
     if (rbh->id == 0xff && rbh->crc == 0xff && rbh->len == RB_MAX_LEN_VALUE) {
         return RB_BLANK_HDR;
     }
-    if (rbh->id == 0xff || rbh->len == 0) {
+    if (rbh->id == 0xff || rbh->len == 0 || rbh->len > MAX_SECTS * FLASH_SECTOR_SIZE) {
         return RB_BAD_HDR;
     }
     return is_crc_good(rbh);
@@ -337,8 +341,9 @@ rb_errors_t rb_findnext_writeable(rb_t *rb) {
         return RB_BAD_CALLER_DATA; // Error handling: Null pointer passed
     }
     do {
-        if (rb->next > FLASH_SECTOR_SIZE - sizeof(hdr) - 1) {
-            rb->next = FLASH_SECTOR(rb->next) + FLASH_SECTOR_SIZE; //skip last few bytes of sector
+        if (MOD_SECTOR(rb->next) > FLASH_SECTOR_SIZE - sizeof(hdr) - 1) {
+            //skip last few bytes of sector
+            rb->next += MOD_SECTOR(rb->next) - FLASH_SECTOR_SIZE - sizeof(hdr) - 1;
             if (rb->next >= __PERSISTENT_LEN) {
                 rb->next = 0; //wrap to first sector allocated
             }
@@ -602,7 +607,6 @@ rb_errors_t rb_create(rb_t *rb, uint32_t base_address,
     rb->base_address = base_address % XIP_BASE;
     rb->number_of_bytes = number_of_sectors * FLASH_SECTOR_SIZE;
     rb->next = 0;
-    rb->is_full = false;
 
     if (force_initialize) {
         flash_erase(rb->base_address, rb->number_of_bytes);

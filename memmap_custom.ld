@@ -21,7 +21,7 @@
     __stack (== StackTop)
 */
 
-__PERSISTENT_STORAGE_LEN = 4k ;
+__PERSISTENT_STORAGE_LEN = 12k ;
 
 MEMORY
 {
