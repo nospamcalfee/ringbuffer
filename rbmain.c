@@ -62,10 +62,12 @@ static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
 }
 
 static rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
-    rb_errors_t err;
+    rb_errors_t err = RB_OK;
     do {
-        err = rb_read(rb, 7, data, size);
-        printf("Just read at  0x%lx stat=%d\n", rb->next, err);
+        uint32_t oldnext = rb->next;
+        int res = rb_read(rb, 7, data, size);
+        if (res < 0) err = -res;
+        printf("Just read from 0x%lx to 0x%lx         stat=%d size=%d\n", oldnext, rb->next, err, res);
         if (err == RB_OK) {
             hexdump(stdout, data, MIN(size, 8), 16, 8);
             return err; //return after 1 read
@@ -77,7 +79,7 @@ static rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
 }
 static rb_t write_rb; //keep the buffer off the stack
 static rb_t read_rb; //keep the buffer off the stack
-static uint8_t workdata[4096]; //local data for transfering
+static uint8_t workdata[4096]; //local data for transferring
 // #define TEST_SIZE (4096-4-4)
 #define TEST_SIZE (256)
 int main(void) {

@@ -5,7 +5,7 @@ if(NOT PICO_SDK_PATH)
 endif()
 include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
-set(PROGRAM_NAME circularbuffer)
+set(PROGRAM_NAME ringbuffer)
 
 project(${PROGRAM_NAME} C CXX ASM)
 
@@ -18,7 +18,7 @@ pico_sdk_init()
 
 add_executable(${PROGRAM_NAME}
   rbmain.c
-  circular_buffer.c
+  ring_buffer.c
   flash_onboard.c
   hexdump.c
 )
