@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <pico/stdlib.h>
 #include <hardware/adc.h>
-#include "circular_buffer.h"
+#include "ring_buffer.h"
 #include "bootsel_button.h"
 #include <inttypes.h>
 
@@ -44,7 +44,8 @@ float read_onboard_temperature(const char unit) {
 
     return -1.0f;
 }
-
+//need a pagebuff per writer, but only one writer per flash allocation
+static uint8_t pagebuff[FLASH_PAGE_SIZE];
 static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
     uint64_t timestamp = time_us_64();
     float temperature = read_onboard_temperature(TEMPERATURE_UNITS);
@@ -52,7 +53,7 @@ static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
     entry.timestamp = timestamp;
     entry.data = temperature;
     printf("writing timestamp=%.1f,temperature=%.2f size=0x%lx ", (double)entry.timestamp / 1000000, entry.data, size);
-    rb_errors_t err = rb_append(rb, 0x7, data, size);
+    rb_errors_t err = rb_append(rb, 0x7, data, size, pagebuff);
     printf("Just wrote at  0x%lx stat=%d\n", rb->next, err);
     // hexdump(stdout, rb, 16, 16, 8);
     if (err != RB_OK) {
@@ -81,7 +82,7 @@ static rb_t write_rb; //keep the buffer off the stack
 static rb_t read_rb; //keep the buffer off the stack
 static uint8_t workdata[4096]; //local data for transferring
 // #define TEST_SIZE (4096-4-4)
-#define TEST_SIZE (256)
+#define TEST_SIZE (1)
 int main(void) {
     int loopcount = 0;
     stdio_init_all();
@@ -89,7 +90,7 @@ int main(void) {
     adc_set_temp_sensor_enabled(true);
     adc_select_input(4);
 
-    rb_errors_t err = rb_create(&write_rb, __PERSISTENT_TABLE, MAX_SECTS, true, true);
+    rb_errors_t err = rb_create(&write_rb, __PERSISTENT_TABLE, MAX_SECTS, false, true);
     if (!(err == RB_OK || err == RB_BLANK_HDR)) {
         printf("starting flash error %d, reiniting\n", err);
         err = rb_create(&write_rb, __PERSISTENT_TABLE, MAX_SECTS, true, true); //start over

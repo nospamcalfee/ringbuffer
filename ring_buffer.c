@@ -203,59 +203,52 @@ static rb_errors_t rb_find_ring_start(rb_t *rb) {
     return hdr_res;
 }
 // here I know entire write will be in this sector, maybe multiple pages
+/*
+  call with a block to write. If it fits in the page, fine write it. If not,
+  write as much as will fit. return either negative error number of positive
+  number of bytes still to be written in the next sector. Will write to flash
+  either if fills a page or if flush is true.
+*/
+static int rb_partial(rb_t *rb, const void *data, uint32_t size, bool flush) {
+    uint32_t pagerem = FLASH_PAGE_SIZE - MOD_PAGE(rb->next);
+    uint32_t wrlen = MIN(pagerem, size); //amount I can write
+
+    memcpy(&rb->rb_page[MOD_PAGE(rb->next)], data, wrlen);
+    if (!MOD_PAGE(rb->next + wrlen) || flush) {
+        //write buffered page into flash
+        flash_prog(rb->base_address + FLASH_PAGE(rb->next), rb->rb_page, FLASH_PAGE_SIZE);
+        memset(rb->rb_page, 0xff, FLASH_PAGE_SIZE); //get page buffer ready
+    }
+    rb->next += wrlen;
+    return size - wrlen; //amount not written
+}
+/*
+ the problem is there are two things to be written, the hdr and the data either
+ or both may be in the previously written page, then the rest can be written in
+ the next page. So like a sector, first write the partial hdr and then the rest
+ of the write which we know will fit in the sector.
+*/
 static rb_errors_t rb_append_page(rb_t *rb, rb_header * hdr, const void *data, uint32_t size) {
-    uint32_t pagerem;   //offset in temp ram buffer
-    uint32_t wrlen;     //amount written so far
-    uint32_t inlen = 0; //offset into data buffer
-    int hdrsize = sizeof(*hdr);
 
     if (MOD_PAGE(rb->next)) {
         //need to load previously written data page aligned
-        flash_read(rb->base_address + FLASH_PAGE(rb->next), rb->rb_page, sizeof(rb->rb_page));
+        //fixme I don't think I ever need to read old data, just write 0xff to old bytes
+        flash_read(rb->base_address + FLASH_PAGE(rb->next), rb->rb_page, FLASH_PAGE_SIZE);
     } else {
         //new page, no need to read current stuff
-        memset(&rb->rb_page, 0xff, sizeof(rb->rb_page)); 
+        memset(rb->rb_page, 0xff, FLASH_PAGE_SIZE);
     }
-    memcpy(&rb->rb_page[MOD_PAGE(rb->next)], hdr, hdrsize);
-    rb->next += hdrsize;
-
-    //fixme if writing 16 bytes at offset 16 pgsize-hdr-existingamount
-    pagerem = FLASH_PAGE_SIZE - MOD_PAGE(rb->next);
-    // amount left on page, should be > hdrsize
-    assert(pagerem > 0);
-
-    wrlen = MIN(pagerem, size); //first page data size
-    if (wrlen > 0) {
-        //fixme here and below, when copying less than a full flash page of data, never leave a gap at the end of less than hdr size!
-        //copy in some actual data bytes
-        memcpy(&rb->rb_page[MOD_PAGE(rb->next)], data, wrlen);
-        //write buffered page into flash, first page.
-        flash_prog(rb->base_address + FLASH_PAGE(rb->next), &rb->rb_page, sizeof(rb->rb_page));
-        rb->next += wrlen;
-        inlen += wrlen;
-        wrlen = size - wrlen; //remaining amount to write
+    int remaining = rb_partial(rb, hdr, sizeof(*hdr), false);
+    if (remaining) {
+        //header was split over a page, write rest to next page
+        remaining = rb_partial(rb, hdr + sizeof(*hdr) - remaining, remaining, false);
     }
-    while (wrlen > 0) {
-        if (wrlen >= FLASH_PAGE_SIZE) {
-            //write a full page
-            flash_prog(rb->base_address + FLASH_PAGE(rb->next), data + inlen, FLASH_PAGE_SIZE);
-            rb->next += FLASH_PAGE_SIZE;
-            inlen += FLASH_PAGE_SIZE;
-            wrlen = wrlen - FLASH_PAGE_SIZE; //remaining amount to write
-        } else {
-            //finally at the last page to write.
-            //This data is less than a page, so blank fill it first
-            memset(&rb->rb_page, 0xff, sizeof(rb->rb_page));
-            memcpy(&rb->rb_page, data + inlen, wrlen );
-            flash_prog(rb->base_address + FLASH_PAGE(rb->next), &rb->rb_page, FLASH_PAGE_SIZE);
-            rb->next += wrlen;
-            inlen += wrlen;
-            wrlen = 0; //remaining amount to write
-        }
-        //write all the rest of the data into flash
-    } //end while
-    if (rb->next >= rb->number_of_bytes) {
-        rb->next = 0; //wrap to first sector
+    remaining = rb_partial(rb, data, size, true);
+    uint32_t written_so_far = size - remaining;
+    while (remaining) {
+        //header was split over a page, write rest to next page
+        remaining = rb_partial(rb, data + written_so_far, remaining, true);
+        written_so_far += written_so_far - remaining;
     }
     return RB_OK;
 }
@@ -314,14 +307,16 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
     return hdr_res;
 }
 // every call will flash the involved sector(s), even tiny data
-rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size) {
+rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
+                      uint8_t *pagebuffer) {
     rb_errors_t hdr_res;
     rb_header rbh;
     if (rb == NULL || data == NULL || size == 0 || id == 0xff || 
-        size > (__PERSISTENT_LEN - sizeof(rbh))) {
+        pagebuffer == NULL || size > (__PERSISTENT_LEN - sizeof(rbh))) {
         return RB_BAD_CALLER_DATA;
     }
 
+    rb->rb_page = pagebuffer; //set temp pointer
     //rbcreate and other appends guarantee pointers are good in rb
     hdr_res = rb_findnext_writeable(rb); //get pointers in rb
     if (hdr_res != RB_BLANK_HDR) return hdr_res;

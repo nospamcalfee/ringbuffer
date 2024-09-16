@@ -2,8 +2,8 @@
  * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause
  */
-#ifndef _CIRCULAR_BUFFER_H_
-#define _CIRCULAR_BUFFER_H_
+#ifndef _RING_BUFFER_H_
+#define _RING_BUFFER_H_
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -76,22 +76,22 @@ typedef struct {
 
 //given a binary power, return the modulo2 mask of its value
 #define MOD_MASK(a) (a - 1)
-#define MOD_SECTOR(a) (a & MOD_MASK(FLASH_SECTOR_SIZE))
-#define MOD_PAGE(a) (a & MOD_MASK(FLASH_PAGE_SIZE))
+#define MOD_SECTOR(a) ((a) & MOD_MASK(FLASH_SECTOR_SIZE))
+#define MOD_PAGE(a) ((a) & MOD_MASK(FLASH_PAGE_SIZE))
 //define amount to round an address to a uint32 boundary
-#define ROUND_UP(a) ((sizeof(uint32_t)) - (a & MOD_MASK(sizeof(uint32_t))) & (MOD_MASK(sizeof(uint32_t)))) 
+#define ROUND_UP(a) ((sizeof(uint32_t)) - ((a) & MOD_MASK(sizeof(uint32_t))) & (MOD_MASK(sizeof(uint32_t))))
 // change arg to page or sector without offset in page or sector
 #define FLASH_PAGE(a) ((a) / FLASH_PAGE_SIZE * FLASH_PAGE_SIZE)
 #define FLASH_SECTOR(a) ((a) / FLASH_SECTOR_SIZE * FLASH_SECTOR_SIZE)
 //the crc is only 5 bits, use upper 3 bits as flags written to flash
 #define RB_HEADER_SPLIT (1<<7)
 
-/* new variable size ring buffer, need one per ring buffer in flash */
+/* Variable size ring buffer, need one per accessor to/from flash */
 typedef struct {
     uint32_t base_address; //offset in flash, not system address
     uint32_t number_of_bytes;
     uint32_t next; //working pointer into flash ring 0<=next<FLASH_SECTOR_SIZE
-    uint8_t rb_page[FLASH_PAGE_SIZE]; //temporary page buffer.
+    uint8_t *rb_page; //only required for writes.
 } rb_t;
 
 typedef enum {
@@ -109,7 +109,9 @@ typedef enum {
 rb_errors_t rb_create(rb_t *rb, uint32_t base_address, 
                       size_t number_of_sectors, bool force_initialize,
                       bool write_buffer);
-rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size);
+//page buffer must be passed with a full page of temp buffer for writes
+rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
+                      uint8_t *pagebuffer);
 int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size);
 //get defines from the .ld link map
 extern char __flash_persistent_start;
