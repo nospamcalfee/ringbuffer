@@ -1,5 +1,5 @@
 /*
- * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
+ * Copyright 2024, Steve Calfee. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #include <stdio.h>
@@ -53,7 +53,7 @@ static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
     entry.timestamp = timestamp;
     entry.data = temperature;
     printf("writing timestamp=%.1f,temperature=%.2f size=0x%lx ", (double)entry.timestamp / 1000000, entry.data, size);
-    rb_errors_t err = rb_append(rb, 0x7, data, size, pagebuff);
+    rb_errors_t err = rb_append(rb, 0x7, data, size, pagebuff, true);
     printf("Just wrote at  0x%lx stat=%d\n", rb->next, err);
     // hexdump(stdout, rb, 16, 16, 8);
     if (err != RB_OK) {
@@ -62,7 +62,7 @@ static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
     return err;
 }
 
-static rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
+rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
     rb_errors_t err = RB_OK;
     do {
         uint32_t oldnext = rb->next;
@@ -109,7 +109,7 @@ int main(void) {
         if (err != RB_OK && loopcount++ > 60) {
             loopcount = 0;
             printf("flash error %d, reiniting rolling over to first sector\n", err);
-            err = rb_create(&write_rb, __PERSISTENT_TABLE, MAX_SECTS, true, true); //start over
+            // err = rb_create(&write_rb, __PERSISTENT_TABLE, MAX_SECTS, true, true); //start over
             if (err != RB_OK) {
                 //init failed, bail
                 printf("flash error %d, quitting\n", err);
@@ -126,7 +126,7 @@ int main(void) {
                 exit(0);
             }
         } else {
-            err = reader(&read_rb, workdata, TEST_SIZE);    
+            err = reader(&read_rb, workdata, TEST_SIZE);
             if (err != RB_OK) read_rb.next = 0;         
         }
         sleep_ms(1000);

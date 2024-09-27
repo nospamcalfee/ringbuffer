@@ -25,8 +25,17 @@ typedef uint64_t (*timestamp_extractor_t)(void *entry);
  The linker should declare flash sectors and locations, but
  the user can have multiple flash rings set up with cb_create
 
- Rings can be 1 to n sectors. If 1 sector, there is a vulnerability to lose
- data during erase and re-write, on a restart.
+ Sector rings are really the ring buffer, internal data also implemented here
+ fits inside sector rings. Rings can be 1 to n sectors. If 1 sector, there is a
+ vulnerability to lose data during erase and re-write, on a restart. With
+ multiple sector rings the problem is on restart to detect the newest and
+ oldest sectors. So every sector has an additional 4 byte header with a 24 bit
+ index and a 5 bit crc for the sector ring header. The ring index goes
+ monotonically up to (number_of_bytes / FLASH_SECTOR_SIZE), so the index can be
+ used to determine where the ring has wrapped, even if all previous pages are
+ full. Assuming flashing is rare, after all the flash wears out at about
+ 100,000 erases, I don't think we need to worry about wrapping the flash
+ index - the flash will be dead by then anyway.
 
  Rings will be checked when used, if invalid, status is returned
  so caller can erase and start over.
@@ -35,17 +44,20 @@ typedef uint64_t (*timestamp_extractor_t)(void *entry);
  sector, and rb_header can be followed to find the last sector used on any
  system startup
 
- Rings start at the lowest sector allocated with a rb_header, userdata etc.
- Users can write from 1 byte to 64K-4 bytes long. If less than 64K is allocated
- in flash sector space, only that much less 4 is the maximum write size.
- Userdata can span over a sector, each new sector entered will be checked for
- blank and erased if requested. Or the save will fail before starting. The new
- sector will have a rb_header with an adjusted len at the start. This preserves
- the ring when old data is erased, but old data may lose its head if it spans a
- sector.
+ Data rings start at the lowest sector allocated with a rb_sector_header and
+ rb_header, user data etc. Users can write from 1 byte to 64K-4 bytes long
+ limited by the len field in rb_header. If less than 64K is allocated in flash
+ sector space, only that much less 8 (rb_sector_header plus one rb_header) is
+ the maximum write size. User data can span over a sector, each new sector
+ entered will be checked for blank and erased (and header added) if requested
+ on the write. Or the write will fail before starting. The new sector will have
+ a rb_sector_header and a rb_header with an adjusted len at the start. This
+ preserves the ring when old data is erased, but old data may lose its head if
+ it spans a sector, and older data is overwritten.
 
- Newest data is in the first sector with incomplete usage by tracing headers
- and lens in rb_header.
+ Oldest data sectors are found using the sector index number - lowest index is
+ oldest. When the oldest is found, the internal data is skipped, until a new
+ blank data area is found or the data area is full.
 
  Reads are kind of tricky. It is assumed that the user will (for any id) read the
  same amount as was written. It is generally intended that the ring buffering
@@ -69,6 +81,25 @@ typedef struct {
     uint8_t crc;   //validity check of rb_header
 } rb_header;
 
+/*
+    sectors also have a structure and 1 word overhead per sector. ASSUMPTION,
+    both rb_header and rb_sector_header are the same size.
+*/
+typedef struct {
+    uint32_t header;    //27 bits of index, 5 bits for crc, use accessors
+} rb_sector_header;
+
+// #define RB_INDEX_MASK 0x7ffffff 5 bit crc
+#define RB_INDEX_MASK 0xffffff
+// static inline uint32_t get_crc (rb_sector_header *p) {return p->header & 0x1f;}
+// static inline void set_index (rb_sector_header *p, uint32_t n) { p->header = (n & RB_INDEX_MASK) << 5 | get_crc(p);}
+// static inline int get_index (rb_sector_header *p) {return p->header >> 5;}
+// static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_index(p) << 5 | (n & 0x1f);}
+static inline uint32_t get_crc (rb_sector_header *p) {return p->header & 0xff;}
+static inline void set_index (rb_sector_header *p, uint32_t n) { p->header = (n & RB_INDEX_MASK) << 8 | get_crc(p);}
+static inline int get_index (rb_sector_header *p) {return p->header >> 8;}
+static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_index(p) << 8 | (n & 0xff);}
+
 #define HEADER_SIZE (sizeof(rb_header))
 //get highest legal value for len in rb_header
 #define RB_MAX_LEN_VALUE ((uint16_t) -1)
@@ -91,6 +122,7 @@ typedef struct {
     uint32_t base_address; //offset in flash, not system address
     uint32_t number_of_bytes;
     uint32_t next; //working pointer into flash ring 0<=next<FLASH_SECTOR_SIZE
+    uint32_t sector_index; //track for ring wraps.
     uint8_t *rb_page; //only required for writes.
 } rb_t;
 
@@ -111,7 +143,7 @@ rb_errors_t rb_create(rb_t *rb, uint32_t base_address,
                       bool write_buffer);
 //page buffer must be passed with a full page of temp buffer for writes
 rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
-                      uint8_t *pagebuffer);
+                      uint8_t *pagebuffer, bool erase_if_full);
 int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size);
 //get defines from the .ld link map
 extern char __flash_persistent_start;
