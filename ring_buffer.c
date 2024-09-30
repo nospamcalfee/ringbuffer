@@ -153,7 +153,7 @@ static int sector_blank_scan(rb_t *rb) {
     if (blanks == size_in_sector) {
         //rest of this sector is blank, check next sector
         uint32_t offs = FLASH_SECTOR(rb->next) + FLASH_SECTOR_SIZE;
-        if (offs > rb->number_of_bytes) {
+        if (offs >= rb->number_of_bytes) {
             offs = 0; //wrap around flash allocation
         }
         uint32_t nextblanks = count_blanks((uint8_t *)XIP_NOCACHE_NOALLOC_BASE + rb->base_address + offs, 0xff, FLASH_SECTOR_SIZE);
@@ -368,7 +368,7 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
         //write will span two sectors, I assume current sector is good
         //fixme assume will not be more than 2 sectors.
         rb_header rbh2;
-        uint32_t size_in_sector = FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next) - hdrsize;
+        uint32_t size_in_first_sector = FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next) - hdrsize;
         uint32_t nextsector =  FLASH_SECTOR(rb->next) + FLASH_SECTOR_SIZE;
         if (nextsector >= rb->number_of_bytes) {
             nextsector = 0; //wrap to first sector allocated
@@ -379,14 +379,17 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
         if (hdr_res == RB_BLANK_HDR) {
             //Only continue if next sector is blank, otherwise caller handles it.
             //first write current sector until filled
-            hdr_res = write_headers(rb, hdr, size_in_sector, 0);
+            hdr_res = write_headers(rb, hdr, size_in_first_sector, 0);
             if (hdr_res != RB_OK){
                 return hdr_res;
             }
-            //second write new sector header, split data header.
-            hdr_res = write_headers(rb, hdr, size - size_in_sector, RB_HEADER_SPLIT);
-            //fixme only works if write doesn't go into another sector
-            hdr_res = rb_append_page(rb, data, size - size_in_sector);
+            hdr_res = rb_append_page(rb, data, size_in_first_sector);
+            if (hdr_res != RB_OK){
+                return hdr_res;
+            }
+           //second write new sector header, split data header.
+            hdr_res = write_headers(rb, hdr, size - size_in_first_sector, RB_HEADER_SPLIT);
+            hdr_res = rb_append_page(rb, data + size_in_first_sector, size - size_in_first_sector);
         } else {
             // not enough space is available, let caller know so he can erase.
             rb->next = savenext;
@@ -423,9 +426,13 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
             hdr_res = rb_sector_append(rb, &rbh, data, size);
             if ((hdr_res == RB_WRAPPED_SECTOR_USED || hdr_res == RB_FULL) && erase_if_full) {
                 //erase next sector in ring
-                nextincr(rb, FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next));
-                assert( MOD_SECTOR(rb->next) == 0);
-                flash_erase(rb->base_address + rb->next, FLASH_SECTOR_SIZE);
+                // we just found out a partial write was tried and then discovered it would not fit, cannot lose current pointer.
+                // nextincr(rb, FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next));
+                uint32_t offs = FLASH_SECTOR(rb->next) + FLASH_SECTOR_SIZE;
+                if (offs >= rb->number_of_bytes) {
+                    offs = 0; //wrap around flash allocation
+                }
+                flash_erase(rb->base_address + offs, FLASH_SECTOR_SIZE);
                 continue; //try append again
             }
         }
@@ -434,11 +441,16 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
     return hdr_res;
 }
 /*
-    read up to size data bytes into data buffer, of next flash which matches id
+    read up to size data bytes into data buffer, of next flash which matches id.
+    If data is less than size, check to see if split into two sectors, and add
+    the second data to the read. If data is less than size, return only the
+    actual data. Return actual amount read or a negative status code.
 */
 int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
     rb_errors_t hdr_res;
     rb_header hdr;
+    int total_read = 0;
+    uint32_t remaining_size = size;
     uint32_t orignext = FLASH_SECTOR(rb->next); //save start of search
     if (rb == NULL || data == NULL || size == 0 || id == 0xff || 
         size > (rb->number_of_bytes - sizeof(hdr))) {
@@ -460,24 +472,29 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
             continue; //do loop again
         }
         //found a good header, use it to read data, maybe split into two reads
-        uint32_t size_in_sector = FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next);
-        uint32_t remaining_size = size;
-        uint32_t read_size = MIN(size_in_sector, size);
+        uint32_t read_size = MIN(hdr.len, remaining_size);
+        // read data in current sector
         flash_read(rb->base_address + rb->next, data, read_size);
-        nextincr(rb, read_size); //fixme use this elsewhere...
+        // skip data so far
+        rb->next = rb_incr(rb->next, read_size, rb->number_of_bytes);
         remaining_size -= read_size;
         data += read_size;
-        while (remaining_size) {
-            read_size = MIN(FLASH_SECTOR_SIZE, remaining_size);
-            flash_read(rb->base_address + rb->next, data, read_size);
-            nextincr(rb, read_size);
-            remaining_size -= read_size;
-            data += read_size;
+        total_read += read_size;
+        hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
+        if (hdr_res != RB_OK) {
+            return -hdr_res;
+        } else {
+            if (hdr.id == id && (hdr.crc & RB_HEADER_SPLIT)) {
+                // I have peeked ahead and this data is split into the next
+                // sector, so read rest of it.
+                continue;
+            }
         }
         break;
     } while (1);
     if (hdr_res == RB_OK) {
-        return size; //fixme - if returned data is too long or short return actual size
+        //If returned data is too long or short return actual size
+        return total_read;
     } else {
         return -hdr_res;
     }

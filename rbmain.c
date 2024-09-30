@@ -82,7 +82,8 @@ static rb_t read_rb; //keep the buffer off the stack
 static uint8_t workdata[4096]; //local data for transferring
 // #define TEST_SIZE (4096-4-4)
 // #define TEST_SIZE (1)
-#define TEST_SIZE (190)
+// #define TEST_SIZE (190)
+#define TEST_SIZE (1024-7)
 int main(void) {
     int loopcount = 0;
     stdio_init_all();
@@ -91,7 +92,7 @@ int main(void) {
     adc_select_input(4);
 
     rb_errors_t err = rb_create(&write_rb, __PERSISTENT_TABLE, MAX_SECTS, false, true);
-    if (!(err == RB_OK || err == RB_BLANK_HDR)) {
+    if (!(err == RB_OK || err == RB_BLANK_HDR || err == RB_HDR_LOOP)) {
         printf("starting flash error %d, reiniting\n", err);
         err = rb_create(&write_rb, __PERSISTENT_TABLE, MAX_SECTS, true, true); //start over
         if (err != RB_OK) {
