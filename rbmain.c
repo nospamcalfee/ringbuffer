@@ -83,7 +83,8 @@ static uint8_t workdata[4096]; //local data for transferring
 // #define TEST_SIZE (4096-4-4)
 // #define TEST_SIZE (1)
 // #define TEST_SIZE (190)
-#define TEST_SIZE (1024-7)
+// #define TEST_SIZE (1024-7)
+#define TEST_SIZE (1024*3-7)
 int main(void) {
     int loopcount = 0;
     stdio_init_all();
