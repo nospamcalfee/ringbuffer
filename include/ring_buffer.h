@@ -1,6 +1,8 @@
 /*
- * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
+ * Copyright 2024, Steve Calfee. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause
+ * Idea spawned from circular_buffer app
+ * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
  */
 #ifndef _RING_BUFFER_H_
 #define _RING_BUFFER_H_

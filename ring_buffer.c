@@ -1,6 +1,8 @@
 /*
- * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
+ * Copyright 2024, Steve Calfee. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause
+ * Idea spawned from circular_buffer app
+ * Copyright 2024, Hiroyuki OYAMA. All rights reserved.
  */
 #include "ring_buffer.h"
 #include <math.h>
