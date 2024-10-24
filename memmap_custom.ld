@@ -21,7 +21,7 @@
     __stack (== StackTop)
 */
 
-__PERSISTENT_STORAGE_LEN = 12k ;
+__PERSISTENT_STORAGE_LEN = 16k ;
 
 MEMORY
 {
@@ -124,7 +124,7 @@ SECTIONS
     __etext = .;
 
 
-    .section_persisitent : {
+    .section_persistent : {
         "ADDR_PERSISTENT" = .;  
     } > FLASH_PERSISTENT
     

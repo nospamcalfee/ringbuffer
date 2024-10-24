@@ -105,10 +105,10 @@ static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_i
 #define HEADER_SIZE (sizeof(rb_header))
 //get highest legal value for len in rb_header
 #define RB_MAX_LEN_VALUE ((uint16_t) -1)
-#define MAX_SECTS (__PERSISTENT_LEN / FLASH_SECTOR_SIZE)
 
 //given a binary power, return the modulo2 mask of its value
 #define MOD_MASK(a) (a - 1)
+//if the flash erase sector is not binary, replace below with a % operation
 #define MOD_SECTOR(a) ((a) & MOD_MASK(FLASH_SECTOR_SIZE))
 #define MOD_PAGE(a) ((a) & MOD_MASK(FLASH_PAGE_SIZE))
 //define amount to round an address to a uint32 boundary
@@ -118,12 +118,16 @@ static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_i
 #define FLASH_SECTOR(a) ((a) / FLASH_SECTOR_SIZE * FLASH_SECTOR_SIZE)
 //the crc is only 5 bits, use upper 3 bits as flags written to flash
 #define RB_HEADER_SPLIT (1<<7)
+#define ARRAY_LENGTH(array) (sizeof (array) / sizeof (const char *))
 
-/* Variable size ring buffer, need one per accessor to/from flash */
+/* Variable size ring buffer, need one struct per accessor to/from flash. next
+   entry could be used to determine amount used, except for the ring wrapping,
+   which is data dependent.
+*/
 typedef struct {
     uint32_t base_address; //offset in flash, not system address
     uint32_t number_of_bytes;
-    uint32_t next; //working pointer into flash ring 0<=next<FLASH_SECTOR_SIZE
+    uint32_t next; //working pointer into flash ring 0<=next<number_of_bytes
     uint32_t sector_index; //track for ring wraps.
     uint8_t *rb_page; //only required for writes.
 } rb_t;
@@ -140,14 +144,30 @@ typedef enum {
     RB_FULL,
 } rb_errors_t;
 
-rb_errors_t rb_create(rb_t *rb, uint32_t base_address, 
-                      size_t number_of_sectors, bool force_initialize,
-                      bool write_buffer);
+//define initialize choices
+enum init_choices {
+    CREATE_FAIL,
+    CREATE_INIT_IF_FAIL,
+    CREATE_INIT_ALWAYS,
+};
+enum write_choices {
+    READ_OPEN,
+    WRITE_OPEN,
+};
+
+rb_errors_t rb_create(rb_t *rb, uint32_t base_address,
+                      size_t number_of_sectors, enum init_choices init_choice,
+                            enum write_choices write_choice);
+//helper to create and re-create (if data is bad) a buffer control block
+rb_errors_t rb_recreate(rb_t *rb, uint32_t base_address,
+                            size_t number_of_sectors, enum init_choices init_choice,
+                            enum write_choices write_choice);
 //page buffer must be passed with a full page of temp buffer for writes
 rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
                       uint8_t *pagebuffer, bool erase_if_full);
 int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size);
 //get defines from the .ld link map
+//users can divide this flash space s they wish
 extern char __flash_persistent_start;
 extern char __flash_persistent_length;
 #define __PERSISTENT_TABLE  ((uint32_t) &__flash_persistent_start)

@@ -44,7 +44,7 @@ static rb_errors_t is_header_good(rb_header *rbh) {
     if (rbh->id == 0xff && rbh->crc == 0xff && rbh->len == RB_MAX_LEN_VALUE) {
         return RB_BLANK_HDR;
     }
-    if (rbh->id == 0xff || rbh->len == 0 || rbh->len > MAX_SECTS * FLASH_SECTOR_SIZE) {
+    if (rbh->id == 0xff || rbh->len == 0 || rbh->len > __PERSISTENT_LEN) {
         return RB_BAD_HDR;
     }
     return is_crc_good(rbh);
@@ -69,7 +69,9 @@ static rb_errors_t make_sector_header(rb_t *rb, rb_sector_header *shdr) {
         return RB_BAD_CALLER_DATA;
     }
     shdr->header = 0;
-    set_index(shdr, ++rb->sector_index); //should range from 1 to 7fffff
+    // should range from 1 to 7fffff fixme analyze possible range with respect
+    // to nand flash life
+    set_index(shdr, ++rb->sector_index);
     uint32_t data = get_index(shdr);
     crc_t crc = crc_init();
     crc = crc_update(crc, &data, 4);
@@ -469,7 +471,7 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
         }
         if (hdr.id != id) {
             //not my data, keep looking
-            rb->next = rb_incr(rb->next, hdr.len + sizeof(hdr), rb->number_of_bytes);
+            rb->next = rb_incr(rb->next, hdr.len, rb->number_of_bytes);
             if (orignext == rb->next) return -RB_HDR_ID_NOT_FOUND;
             continue; //do loop again
         }
@@ -482,14 +484,23 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
         remaining_size -= read_size;
         data += read_size;
         total_read += read_size;
-        hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
-        if (hdr_res != RB_OK) {
-            return -hdr_res;
-        } else {
-            if (hdr.id == id && (hdr.crc & RB_HEADER_SPLIT)) {
-                // I have peeked ahead and this data is split into the next
-                // sector, so read rest of it.
-                continue;
+        if (!MOD_SECTOR(rb->next)) {
+            //if we end on a sector boundary, maybe this data is split into the
+            //new sector - this needs big testing...
+            rb_errors_t prefetch_hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
+            if ( !(prefetch_hdr_res == RB_OK || prefetch_hdr_res == RB_BLANK_HDR)) {
+                return -prefetch_hdr_res;
+            } else {
+                if (hdr.id == id && (hdr.crc & RB_HEADER_SPLIT)) {
+                    // I have peeked ahead and this data is split into the next
+                    // sector, so recurse to read rest of it.
+                    hdr_res = rb_read(rb, id, data, remaining_size);
+                    //fixme - combine with previous reads
+                    if (hdr_res > 0) {
+                        total_read += hdr_res;
+                    }
+                    break;
+                }
             }
         }
         break;
@@ -506,8 +517,8 @@ Create a new variable sized ringbuffer control block, maybe erasing the whole
 thing. Also, for writes find the next writeable area. 
 */
 rb_errors_t rb_create(rb_t *rb, uint32_t base_address, 
-                      size_t number_of_sectors, bool force_initialize,
-                      bool write_buffer) {
+                      size_t number_of_sectors, enum init_choices init_choice,
+                            enum write_choices write_choice) {
     rb_errors_t hdr_err = RB_BAD_HDR;
 #ifdef PICO_FLASH_SIZE_BYTES
     if (number_of_sectors > PICO_FLASH_SIZE_BYTES / FLASH_SECTOR_SIZE) {
@@ -522,20 +533,36 @@ rb_errors_t rb_create(rb_t *rb, uint32_t base_address,
     rb->number_of_bytes = number_of_sectors * FLASH_SECTOR_SIZE;
     rb->next = 0;
 
-    if (force_initialize) {
+    if (init_choice == CREATE_INIT_ALWAYS) {
         flash_erase(rb->base_address, rb->number_of_bytes);
         hdr_err = RB_OK;
     } else {
         /* Request was to continue in rb as exists in flash. First verify flash
            is in reasonable order. */
         hdr_err = rb_find_ring_oldest_sector(rb);
-        // uint32_t oldest = rb->next;
         if (hdr_err == RB_OK || hdr_err == RB_BLANK_HDR) {
-            if (write_buffer) {
+            if (write_choice == WRITE_OPEN) {
                 hdr_err = rb_findnext_writeable(rb);
             }
         }
     }
     //it is up to the user to deal with rb errors
     return hdr_err;
+}
+//helper to create and re-create (if data is bad) a buffer control block
+rb_errors_t rb_recreate(rb_t *rb, uint32_t base_address,
+                            size_t number_of_sectors, enum init_choices init_choice,
+                            enum write_choices write_choice) {
+    rb_errors_t err = rb_create(rb, base_address, number_of_sectors, init_choice, write_choice);
+    if (init_choice != CREATE_FAIL) {
+        if (!(err == RB_OK || err == RB_BLANK_HDR || err == RB_HDR_LOOP)) {
+            printf("starting flash error %d, reiniting\n", err);
+            err = rb_create(rb, base_address, number_of_sectors, init_choice, write_choice); //start over
+            if (err != RB_OK) {
+                //init failed, bail
+                printf("starting flash error %d, quitting\n", err);
+            }
+        }
+    }
+    return err;
 }
