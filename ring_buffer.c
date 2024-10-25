@@ -173,7 +173,7 @@ if there is not enough room.
 */
 static rb_errors_t rb_findnext_writeable(rb_t *rb) {
     rb_header hdr;
-    uint32_t origrb = FLASH_SECTOR(rb->next); //start of this page
+    // uint32_t origrb = FLASH_SECTOR(rb->next); //start of this page
     assert(rb->next < rb->number_of_bytes);
     rb_errors_t hdr_res = RB_BAD_HDR;
     if (rb == NULL ) {
@@ -205,11 +205,13 @@ static rb_errors_t rb_findnext_writeable(rb_t *rb) {
         //keep looking for end of rb
         uint32_t oldnext = rb->next;
         rb->next = rb_incr(rb->next, hdr.len + sizeof(hdr), rb->number_of_bytes);
-        if (FLASH_SECTOR(rb->next) == origrb){
-            //data in flash is full, we wrapped.
-            rb->next = FLASH_SECTOR(rb->next);
-            return RB_HDR_LOOP;
-        }
+//fixme in a single sector system can I detect  a full sector? the following 
+//worked for multi sectors.
+        // if (FLASH_SECTOR(rb->next) == origrb){
+        //     //data in flash is full, we wrapped.
+        //     rb->next = FLASH_SECTOR(rb->next);
+        //     return RB_HDR_LOOP;
+        // }
         hdr_res = fetch_and_check_header(rb, &hdr, 0);
         if (hdr_res != RB_OK && hdr_res != RB_BLANK_HDR) {
             return hdr_res;

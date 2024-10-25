@@ -104,10 +104,11 @@ static uint8_t workdata[FLASH_SECTOR_SIZE]; //local data for transferring
 static rb_errors_t write_ssids(rb_t *rb, rb_t *rdrb) {
     //first read existing ssids, see if all full for 3 wifi groups
     //that means read 6 strings, which are ssid, then password
-    uint32_t good_reads = 0;
     char tempssid[64]; //note this comes on a very small cpu stack of 4k - ok for a test.
     int res;
-    do {
+    uint32_t good_reads;
+    for (good_reads = 0; good_reads < SSID_TEST_WRITES; good_reads++)
+    {
         uint32_t oldnext = rdrb->next;
         res = rb_read(rdrb, SSID_ID, tempssid, sizeof(tempssid));
         printf("Just read from 0x%lx to 0x%lx stat=%d size=%d\n", oldnext, rdrb->next, -res, res);
@@ -119,18 +120,13 @@ static rb_errors_t write_ssids(rb_t *rb, rb_t *rdrb) {
             if (-res != RB_OK) {
                 printf("some read failure, stop reading %d\n", -res);
             }
-            break;
+            break; //quit reading on errors
         } else {
             //we just got a string, just print it. //fixme check it.
             printf("%s\n", tempssid);
             hexdump(stdout, tempssid, MIN(res, 8), 16, 8);
-            good_reads++;
-            if (good_reads >= SSID_TEST_WRITES) {
-                break;
-            }
-            continue; //keep reading
         }
-    } while (true);
+    }
     //less than required number of strings, write more.
     for (uint32_t i = good_reads; i < SSID_TEST_WRITES; i++) {
         //finally we get to write some strings
@@ -167,7 +163,7 @@ static rb_errors_t read_ssids(rb_t *rb){
     for (uint32_t i = 0; i < SSID_TEST_WRITES; i++) {
         err = rb_read(rb, SSID_ID, ssidbuf, sizeof(ssidbuf));
 
-        printf("Just read ssid %ld %s at 0x%lx stat=%d\n", i, ssidbuf, rb->next, err);
+        printf("Reading ssid %ld %s at 0x%lx stat=%d\n", i, ssidbuf, rb->next, err);
         hexdump(stdout, ssidbuf, err + 1, 16, 8);
         if (err <= 0) {
             printf("some read failure %d\n", err);
