@@ -118,6 +118,10 @@ static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_i
 #define FLASH_SECTOR(a) ((a) / FLASH_SECTOR_SIZE * FLASH_SECTOR_SIZE)
 //the crc is only 5 bits, use upper 3 bits as flags written to flash
 #define RB_HEADER_SPLIT (1<<7)
+//and there are 2 other non-crc bits that can be used
+//they are created as 1 bits and can be erased anytime to zero as needed
+#define RB_HEADER_NOT_SMUDGED (1<<6)
+#define RB_HEADER_UNUSED (1<<5)
 #define ARRAY_LENGTH(array) (sizeof (array) / sizeof (const char *))
 
 /* Variable size ring buffer, need one struct per accessor to/from flash. next

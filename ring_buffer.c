@@ -37,7 +37,11 @@ static rb_errors_t is_crc_good(rb_header *rbh) {
     crc = crc_update(crc, rbh, 3); //fixme assumes little endian?
     crc = crc_finalize(crc);
     //remove any used flags from crc check
-    if ((rbh->crc & ~RB_HEADER_SPLIT) != crc) return RB_BAD_HDR;
+    if ((rbh->crc & ~(RB_HEADER_SPLIT |
+                      RB_HEADER_NOT_SMUDGED |
+                      RB_HEADER_UNUSED)) != crc) {
+        return RB_BAD_HDR;
+    }
     return RB_OK; //for now no crc check
 }
 static rb_errors_t is_header_good(rb_header *rbh) {
@@ -305,7 +309,8 @@ static rb_errors_t rb_append_page(rb_t *rb, const void *data, uint32_t size) {
     if (MOD_PAGE(rb->next)) {
         //need to load previously written data page aligned
         //fixme I don't think I ever need to read old data, just write 0xff to old bytes
-        flash_read(rb->base_address + FLASH_PAGE(rb->next), rb->rb_page, FLASH_PAGE_SIZE);
+        // flash_read(rb->base_address + FLASH_PAGE(rb->next), rb->rb_page, FLASH_PAGE_SIZE);
+        memset(rb->rb_page, 0xff, FLASH_PAGE_SIZE);
     } else {
         //new page, no need to read current stuff
         memset(rb->rb_page, 0xff, FLASH_PAGE_SIZE);
@@ -365,14 +370,14 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
 
     if (size_needed < FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next)) {
         //write will fit this flash sector, write pages
-        hdr_res = write_headers(rb, hdr, size, 0);
+        hdr_res = write_headers(rb, hdr, size, RB_HEADER_NOT_SMUDGED);
         if (hdr_res != RB_OK) {
             return hdr_res;
         }
         hdr_res = rb_append_page(rb, data, size);
     } else {
         //write will span two sectors, I assume current sector is good
-        //fixme assume will not be more than 2 sectors.
+        //fixme assumes will not be more than 2 sectors.
         rb_header rbh2;
         uint32_t size_in_first_sector = FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next) - hdrsize;
         uint32_t nextsector =  FLASH_SECTOR(rb->next) + FLASH_SECTOR_SIZE;
@@ -385,7 +390,7 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
         if (hdr_res == RB_BLANK_HDR) {
             //Only continue if next sector is blank, otherwise caller handles it.
             //first write current sector until filled
-            hdr_res = write_headers(rb, hdr, size_in_first_sector, 0);
+            hdr_res = write_headers(rb, hdr, size_in_first_sector, RB_HEADER_NOT_SMUDGED);
             if (hdr_res != RB_OK){
                 return hdr_res;
             }
@@ -394,7 +399,8 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
                 return hdr_res;
             }
            //second write new sector header, split data header.
-            hdr_res = write_headers(rb, hdr, size - size_in_first_sector, RB_HEADER_SPLIT);
+            hdr_res = write_headers(rb, hdr, size - size_in_first_sector,
+                                    RB_HEADER_SPLIT | RB_HEADER_NOT_SMUDGED);
             hdr_res = rb_append_page(rb, data + size_in_first_sector, size - size_in_first_sector);
         } else {
             // not enough space is available, let caller know so he can erase.
@@ -428,7 +434,7 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
         hdr_res = rb_findnext_writeable(rb); //get pointers in rb
         if (hdr_res == RB_BLANK_HDR) {
             //fixme add sector header if first in sector
-            hdr_res = make_header(&rbh, id, size);
+            rbh.id = id; //only thing needed from here on the header
             hdr_res = rb_sector_append(rb, &rbh, data, size);
             if ((hdr_res == RB_WRAPPED_SECTOR_USED || hdr_res == RB_FULL) && erase_if_full) {
                 //erase next sector in ring
@@ -458,7 +464,7 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
     int total_read = 0;
     uint32_t remaining_size = size;
     uint32_t orignext = FLASH_SECTOR(rb->next); //save start of search
-    if (rb == NULL || data == NULL || size == 0 || id == 0xff || 
+    if (rb == NULL || data == NULL || size == 0 || id == 0xff || id == 00 ||
         size > (rb->number_of_bytes - sizeof(hdr))) {
         return -RB_BAD_CALLER_DATA;
     }
@@ -471,8 +477,8 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
         default:
             return -hdr_res; //return errors here
         }
-        if (hdr.id != id) {
-            //not my data, keep looking
+        if (hdr.id != id || !(hdr.crc & RB_HEADER_NOT_SMUDGED)) {
+            //not my data, or it was erased, keep looking
             rb->next = rb_incr(rb->next, hdr.len, rb->number_of_bytes);
             if (orignext == rb->next) return -RB_HDR_ID_NOT_FOUND;
             continue; //do loop again
