@@ -172,6 +172,20 @@ static rb_errors_t read_ssids(rb_t *rb){
     }
     return err;
 }
+/* function to delete a specific written record, which matches id and the
+   entire data matches the data field. Needs a scratch buffer for reads,
+   matches data to scratch AND id, then smudges the flash entry.
+*/
+rb_errors_t erase_ssid(rb_t *rb, uint8_t id, uint8_t *data, uint32_t size, uint8_t *scratch){
+    int err;
+    err = rb_find(rb, id, data, size, scratch);
+    if (err <= 0) {
+        printf("some read failure %d\n", -err);
+        return -err;
+    }
+    rb_errors_t t = rb_smudge(rb, err); //this deletes the entry
+    return t;
+}
 // #define TEST_SIZE (4096-4-4)
 // #define TEST_SIZE (1)
 // #define TEST_SIZE (190)
@@ -203,9 +217,9 @@ int main(void) {
         printf("starting flash error %d, quitting\n", err);
         exit(1);
     }
-
+    sleep_ms(4000);
     printf("linker defined persistent area 0x%lx, len 0x%lx st=%d\n", __PERSISTENT_TABLE, __PERSISTENT_LEN, err);
-
+    sleep_ms(1000);
     write_ssids(&write_ssid_rb, &read_ssid_rb);
     read_ssids(&read_ssid_rb);
 

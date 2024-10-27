@@ -278,24 +278,22 @@ static rb_errors_t rb_find_ring_oldest_sector(rb_t *rb) {
     rb->next = oldnext;
     return hdr_res;
 }
-// here I know entire write will be in this sector, maybe multiple pages
 /*
-  call with a block to write. If it fits in the page, fine write it. If not,
-  write as much as will fit. return either negative error number of positive
-  number of bytes still to be written in the next sector. Will flash write to
-  flash memory either if fills a page or if flush is true.
+  Here I know entire write will be in this sector, maybe multiple pages. call
+  with a block to write. If it fits in the page, fine write it. If not, write
+  as much as will fit. return either negative error number of positive number
+  of bytes still to be written in the next sector. Will flash write to flash
+  memory either if fills a page or if flush is true.
 */
-static int rb_partial(rb_t *rb, const void *data, uint32_t size, bool flush) {
+static int rb_partial(rb_t *rb, const void *data, uint32_t size) {
     uint32_t pagerem = FLASH_PAGE_SIZE - MOD_PAGE(rb->next);
     uint32_t wrlen = MIN(pagerem, size); //amount I can write
 
     memcpy(&rb->rb_page[MOD_PAGE(rb->next)], data, wrlen);
-    if (!MOD_PAGE(rb->next + wrlen) || flush) {
-        //write buffered page into flash
-        flash_prog(rb->base_address + FLASH_PAGE(rb->next), rb->rb_page, FLASH_PAGE_SIZE);
-        memset(rb->rb_page, 0xff, FLASH_PAGE_SIZE); //get page buffer ready
-    }
-    nextincr(rb, wrlen);
+    //write buffered page into flash
+    flash_prog(rb->base_address + FLASH_PAGE(rb->next), rb->rb_page, FLASH_PAGE_SIZE);
+    memset(rb->rb_page, 0xff, FLASH_PAGE_SIZE); //get page buffer ready
+nextincr(rb, wrlen);
     return size - wrlen; //amount not written
 }
 /*
@@ -315,15 +313,10 @@ static rb_errors_t rb_append_page(rb_t *rb, const void *data, uint32_t size) {
         //new page, no need to read current stuff
         memset(rb->rb_page, 0xff, FLASH_PAGE_SIZE);
     }
-    // int remaining = rb_partial(rb, hdr, sizeof(*hdr), false);
-    // if (remaining) {
-    //     //header was split over a page, write rest to next page
-    //     remaining = rb_partial(rb, hdr + sizeof(*hdr) - remaining, remaining, false);
-    // }
-    int remaining = rb_partial(rb, data, size, true);
+    int remaining = rb_partial(rb, data, size);
     while (remaining) {
         //header was split over a page, write rest to next page
-        remaining = rb_partial(rb, data + size - remaining, remaining, true);
+        remaining = rb_partial(rb, data + size - remaining, remaining);
     }
     return RB_OK;
 }
@@ -452,6 +445,61 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
     } while (1);
     return hdr_res;
 }
+/* search flash for an existing entry id and data match. return positive offset
+   of match or negative error number */
+int rb_find(rb_t *rb, uint8_t id, void *data, uint32_t size, uint8_t *scratch) {
+    rb_errors_t hdr_res;
+    rb_header hdr;
+    uint32_t orignext = FLASH_SECTOR(rb->next); //save start of search
+    if (rb == NULL || data == NULL || size == 0 || id == 0xff || id == 00 ||
+        size > (rb->number_of_bytes - sizeof(hdr))) {
+        return -RB_BAD_CALLER_DATA;
+    }
+    do {
+        hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
+        switch (hdr_res) {
+        case RB_OK: //legit hdr, read this
+            rb->next += sizeof(hdr);
+            break; //exit switch not loop
+        default:
+            return -hdr_res; //return errors here
+        }
+        if (hdr.id != id || !(hdr.crc & RB_HEADER_NOT_SMUDGED)) {
+            //not my data, or it was erased, keep looking
+            rb->next = rb_incr(rb->next, hdr.len, rb->number_of_bytes);
+            if (orignext == rb->next) return -RB_HDR_ID_NOT_FOUND;
+            continue; //do loop again
+        }
+        //found next entry, read it into scratch buffer
+        uint32_t oldnext = rb->next;
+        hdr_res = rb_read(rb, id, scratch, size);
+        if (hdr_res > 0) {
+            // now see if it is the correct entry, and found.
+            if (!memcmp(data, scratch, size)) {
+                return oldnext; //found match, return its location
+            }
+        } else {
+            return hdr_res;
+        }
+    } while (true);
+}
+//this function effectively deletes a flash record, by smudging it, which can be
+//done after it is already written. Due to nand flash implementations, I can
+//write 1 bits to 0 bits, but not vice-versa
+rb_errors_t rb_smudge(rb_t *rb, uint32_t offset_to_smudge) {
+    rb_header hdr;
+    uint32_t savenext = rb->next;
+    rb->next = offset_to_smudge;
+    rb_errors_t hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
+    if (hdr_res != RB_OK) {
+        return hdr_res; //return errors here
+    }
+    //overwrite the old crc byte clearing the smudge bit
+    hdr.crc &= ~RB_HEADER_NOT_SMUDGED;
+    int res = rb_append_page(rb, &hdr.crc, 1);
+    rb->next = savenext; //fixme I am not sure I need this, but it shouldn't hurt.
+    return res;
+}
 /*
     read up to size data bytes into data buffer, of next flash which matches id.
     If data is less than size, check to see if split into two sectors, and add
@@ -499,6 +547,9 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
             if ( !(prefetch_hdr_res == RB_OK || prefetch_hdr_res == RB_BLANK_HDR)) {
                 return -prefetch_hdr_res;
             } else {
+                //fixme do I need to check here for deleted? what about a split
+                //deleted? should a smudged deleted also handle its split? I
+                //think yes.
                 if (hdr.id == id && (hdr.crc & RB_HEADER_SPLIT)) {
                     // I have peeked ahead and this data is split into the next
                     // sector, so recurse to read rest of it.
