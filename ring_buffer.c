@@ -98,8 +98,8 @@ static rb_errors_t make_header(rb_header *rbh, uint8_t id, uint32_t size) {
 /*
  Increment offset to next ring address. If it steps out of a sector, wrap to
  next sector or around to first sector if necessary. If it steps within a
- sector but there isnt room for at least a header and one data byte, skip to
- next sector. irregardless of len argument the max it will increment is to the
+ sector but there is no room for at least a header and one data byte, skip to
+ next sector. Irregardless of len argument the max it will increment is to the
  next sector.
 */
 static uint32_t rb_incr(uint32_t oldlen, uint32_t len, uint32_t maxlen){
@@ -177,7 +177,7 @@ if there is not enough room.
 */
 static rb_errors_t rb_findnext_writeable(rb_t *rb) {
     rb_header hdr;
-    // uint32_t origrb = FLASH_SECTOR(rb->next); //start of this page
+    uint32_t origrb = FLASH_SECTOR(rb->next); //start of this page
     assert(rb->next < rb->number_of_bytes);
     rb_errors_t hdr_res = RB_BAD_HDR;
     if (rb == NULL ) {
@@ -189,20 +189,7 @@ static rb_errors_t rb_findnext_writeable(rb_t *rb) {
             nextincr(rb, FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next));
         }
         hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
-        switch (hdr_res) {
-        case RB_OK: //legit hdr, update ptrs
-            /* 
-            if header is at end of wrapped rb return status. Writer will split
-            user data over sectors, but never a header. Writer will write a
-            header at the start of every sector. Reader will detect that last
-            block in sector does not include a space for at least 1 user byte
-            and will skip to next sector
-            */
-            break;
-        case RB_BLANK_HDR:
-            //blank headers are ok, found next available in rb, all done
-            return hdr_res;
-        default:
+        if (hdr_res != RB_OK) {
             return hdr_res; //return errors here
          }
         //found a good header, use it to skip ahead
@@ -211,11 +198,11 @@ static rb_errors_t rb_findnext_writeable(rb_t *rb) {
         rb->next = rb_incr(rb->next, hdr.len + sizeof(hdr), rb->number_of_bytes);
 //fixme in a single sector system can I detect  a full sector? the following 
 //worked for multi sectors.
-        // if (FLASH_SECTOR(rb->next) == origrb){
-        //     //data in flash is full, we wrapped.
-        //     rb->next = FLASH_SECTOR(rb->next);
-        //     return RB_HDR_LOOP;
-        // }
+        if (FLASH_SECTOR(rb->next) == origrb){
+            //data in flash is full, we wrapped.
+            rb->next = FLASH_SECTOR(rb->next);
+            return RB_HDR_LOOP;
+        }
         hdr_res = fetch_and_check_header(rb, &hdr, 0);
         if (hdr_res != RB_OK && hdr_res != RB_BLANK_HDR) {
             return hdr_res;
@@ -446,8 +433,9 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
     return hdr_res;
 }
 /* search flash for an existing entry id and data match. return positive offset
-   of match or negative error number */
-int rb_find(rb_t *rb, uint8_t id, void *data, uint32_t size, uint8_t *scratch) {
+   of match or negative error number. scratch must be at least size bytes
+   longs */
+int rb_find(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *scratch) {
     rb_errors_t hdr_res;
     rb_header hdr;
     uint32_t orignext = FLASH_SECTOR(rb->next); //save start of search
@@ -457,16 +445,12 @@ int rb_find(rb_t *rb, uint8_t id, void *data, uint32_t size, uint8_t *scratch) {
     }
     do {
         hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
-        switch (hdr_res) {
-        case RB_OK: //legit hdr, read this
-            rb->next += sizeof(hdr);
-            break; //exit switch not loop
-        default:
+        if (hdr_res != RB_OK) {
             return -hdr_res; //return errors here
         }
         if (hdr.id != id || !(hdr.crc & RB_HEADER_NOT_SMUDGED)) {
-            //not my data, or it was erased, keep looking
-            rb->next = rb_incr(rb->next, hdr.len, rb->number_of_bytes);
+            //not my data, or it was erased, skip the header and the data
+            rb->next = rb_incr(rb->next, hdr.len + sizeof(hdr), rb->number_of_bytes);
             if (orignext == rb->next) return -RB_HDR_ID_NOT_FOUND;
             continue; //do loop again
         }
@@ -478,6 +462,7 @@ int rb_find(rb_t *rb, uint8_t id, void *data, uint32_t size, uint8_t *scratch) {
             if (!memcmp(data, scratch, size)) {
                 return oldnext; //found match, return its location
             }
+            continue; //keep searching.
         } else {
             return hdr_res;
         }
@@ -496,9 +481,32 @@ rb_errors_t rb_smudge(rb_t *rb, uint32_t offset_to_smudge) {
     }
     //overwrite the old crc byte clearing the smudge bit
     hdr.crc &= ~RB_HEADER_NOT_SMUDGED;
+    rb->next += offsetof(rb_header, crc);
     int res = rb_append_page(rb, &hdr.crc, 1);
     rb->next = savenext; //fixme I am not sure I need this, but it shouldn't hurt.
     return res;
+}
+/* given a writable page, delete a matching id, string entry */
+rb_errors_t rb_delete(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *pagebuffer) {
+    if (rb == NULL || data == NULL || id == 0 || id == 0xff ||
+        pagebuffer == NULL) {
+        return RB_BAD_CALLER_DATA;
+    }
+    rb->rb_page = pagebuffer; //set temp area pointer
+    //I think it makes sense to always delete the first match?
+    rb_errors_t hdr_err = rb_find_ring_oldest_sector(rb);
+    if (hdr_err != RB_OK) {
+        return hdr_err;
+    }
+    int res = rb_find(rb, id, data, size, pagebuffer);
+    if (res < 0) {
+        //some error
+        printf("some read failure %d looking for %s\n", -res, (char *) data);
+    } else {
+        printf("erasing \n%s\n", (char *) data);
+        res = rb_smudge(rb, res); //this deletes the entry
+    }
+        return -res;
 }
 /*
     read up to size data bytes into data buffer, of next flash which matches id.
@@ -518,25 +526,22 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
     }
     do {
         hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
-        switch (hdr_res) {
-        case RB_OK: //legit hdr, read this
-            rb->next += sizeof(hdr);
-            break;
-        default:
+        if (hdr_res != RB_OK) {
             return -hdr_res; //return errors here
         }
         if (hdr.id != id || !(hdr.crc & RB_HEADER_NOT_SMUDGED)) {
             //not my data, or it was erased, keep looking
-            rb->next = rb_incr(rb->next, hdr.len, rb->number_of_bytes);
+            rb->next = rb_incr(rb->next, hdr.len + sizeof(hdr), rb->number_of_bytes);
             if (orignext == rb->next) return -RB_HDR_ID_NOT_FOUND;
             continue; //do loop again
         }
         //found a good header, use it to read data, maybe split into two reads
         uint32_t read_size = MIN(hdr.len, remaining_size);
+        rb->next += sizeof(hdr);
         // read data in current sector
         flash_read(rb->base_address + rb->next, data, read_size);
-        // skip data so far
-        rb->next = rb_incr(rb->next, read_size, rb->number_of_bytes);
+        // skip data so far, may be longer than amount just red
+        rb->next = rb_incr(rb->next, hdr.len, rb->number_of_bytes);
         remaining_size -= read_size;
         data += read_size;
         total_read += read_size;
@@ -573,7 +578,9 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
 }
 /* 
 Create a new variable sized ringbuffer control block, maybe erasing the whole
-thing. Also, for writes find the next writeable area. 
+thing. Also, for writes find the next writeable area. The difference between
+READ_OPEN, WRITE_OPEN is reads leaves the pointer at the oldest flash entry and
+writes leaves at the next blank entry.
 */
 rb_errors_t rb_create(rb_t *rb, uint32_t base_address, 
                       size_t number_of_sectors, enum init_choices init_choice,
@@ -616,7 +623,7 @@ rb_errors_t rb_recreate(rb_t *rb, uint32_t base_address,
     if (init_choice != CREATE_FAIL) {
         if (!(err == RB_OK || err == RB_BLANK_HDR || err == RB_HDR_LOOP)) {
             printf("starting flash error %d, reiniting\n", err);
-            err = rb_create(rb, base_address, number_of_sectors, init_choice, write_choice); //start over
+            err = rb_create(rb, base_address, number_of_sectors, CREATE_INIT_ALWAYS, write_choice);
             if (err != RB_OK) {
                 //init failed, bail
                 printf("starting flash error %d, quitting\n", err);

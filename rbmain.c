@@ -88,10 +88,16 @@ rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
 
 #define SSID_ID 0x3a
 //ssid save and recover tests
-const char * test_strings[] = {
+const char *test_strings[] = {
     "First entry",
     "Second Long entry",
     "Third",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
 };
 #define SSID_TEST_WRITES 7
 static rb_t write_rb; //keep the buffer off the stack
@@ -111,7 +117,7 @@ static rb_errors_t write_ssids(rb_t *rb, rb_t *rdrb) {
     {
         uint32_t oldnext = rdrb->next;
         res = rb_read(rdrb, SSID_ID, tempssid, sizeof(tempssid));
-        printf("Just read from 0x%lx to 0x%lx stat=%d size=%d\n", oldnext, rdrb->next, -res, res);
+        printf("ssid write, read from 0x%lx to 0x%lx stat=%d size=%d\n", oldnext, rdrb->next, -res, res);
         if (res < 0)  {
             if (-res == RB_HDR_ID_NOT_FOUND) {
                 //we only found some of the desired records
@@ -123,8 +129,8 @@ static rb_errors_t write_ssids(rb_t *rb, rb_t *rdrb) {
             break; //quit reading on errors
         } else {
             //we just got a string, just print it. //fixme check it.
-            printf("%s\n", tempssid);
-            hexdump(stdout, tempssid, MIN(res, 8), 16, 8);
+            printf("ssid write preread \"%s\"\n", tempssid);
+            // hexdump(stdout, tempssid, MIN(res, 8), 16, 8);
         }
     }
     //less than required number of strings, write more.
@@ -163,8 +169,8 @@ static rb_errors_t read_ssids(rb_t *rb){
     for (uint32_t i = 0; i < SSID_TEST_WRITES; i++) {
         err = rb_read(rb, SSID_ID, ssidbuf, sizeof(ssidbuf));
 
-        printf("Reading ssid %ld %s at 0x%lx stat=%d\n", i, ssidbuf, rb->next, err);
-        hexdump(stdout, ssidbuf, err + 1, 16, 8);
+        printf("Reading ssid %ld at 0x%lx stat=%d\n\"%s\"\n", i, rb->next, err, ssidbuf);
+        // hexdump(stdout, ssidbuf, err + 1, 16, 8);
         if (err <= 0) {
             printf("some read failure %d\n", err);
             return err;
@@ -176,15 +182,9 @@ static rb_errors_t read_ssids(rb_t *rb){
    entire data matches the data field. Needs a scratch buffer for reads,
    matches data to scratch AND id, then smudges the flash entry.
 */
-rb_errors_t erase_ssid(rb_t *rb, uint8_t id, uint8_t *data, uint32_t size, uint8_t *scratch){
-    int err;
-    err = rb_find(rb, id, data, size, scratch);
-    if (err <= 0) {
-        printf("some read failure %d\n", -err);
-        return -err;
-    }
-    rb_errors_t t = rb_smudge(rb, err); //this deletes the entry
-    return t;
+rb_errors_t erase_ssid(rb_t *rb, uint8_t id, const uint8_t *data, uint32_t size, uint8_t *scratch){
+    int err = rb_delete(rb, id, data, size, scratch);
+    return err;
 }
 // #define TEST_SIZE (4096-4-4)
 // #define TEST_SIZE (1)
@@ -221,6 +221,13 @@ int main(void) {
     printf("linker defined persistent area 0x%lx, len 0x%lx st=%d\n", __PERSISTENT_TABLE, __PERSISTENT_LEN, err);
     sleep_ms(1000);
     write_ssids(&write_ssid_rb, &read_ssid_rb);
+    read_ssids(&read_ssid_rb);
+    for (uint32_t i = 0; i < ARRAY_LENGTH(test_strings); i++) {
+        err = erase_ssid(&write_ssid_rb, SSID_ID, (const uint8_t *)test_strings[i], strlen(test_strings[i]), ssidbuf);
+        if (err == RB_OK) {
+            break;
+        }
+    }
     read_ssids(&read_ssid_rb);
 
     while (true) {

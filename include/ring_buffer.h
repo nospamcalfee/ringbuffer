@@ -79,7 +79,7 @@ typedef uint64_t (*timestamp_extractor_t)(void *entry);
 // Declaration of functions related to the ring buffer
 typedef struct {
     uint16_t len;  //blob size - used to find next storage item.
-    uint8_t id;    //multiple kinds of user data can be saved, must not be 0xff
+    uint8_t id;    //multiple kinds of user data can be saved, must not be 0xff OR 0
     uint8_t crc;   //validity check of rb_header
 } rb_header;
 
@@ -170,8 +170,11 @@ rb_errors_t rb_recreate(rb_t *rb, uint32_t base_address,
 rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
                       uint8_t *pagebuffer, bool erase_if_full);
 int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size);
-int rb_find(rb_t *rb, uint8_t id, void *data, uint32_t size, uint8_t *scratch);
+int rb_find(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *scratch);
 rb_errors_t rb_smudge(rb_t *rb, uint32_t offset_to_smudge);
+/* given a writeable page, delete a matching id, string entry */
+rb_errors_t rb_delete(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *pagebuffer);
+
 //get defines from the .ld link map
 //users can divide this flash space s they wish
 extern char __flash_persistent_start;
