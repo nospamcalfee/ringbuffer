@@ -143,8 +143,8 @@ static rb_errors_t write_ssids(rb_t *rb, rb_t *rdrb) {
         strcat(tempssid, "\n");
         rb_errors_t err = rb_append(rb, SSID_ID, tempssid, strlen(tempssid) + 1,
                                     ssidbuf, true);
-        printf("Just wrote ssid %ld %s at 0x%lx stat=%d\n", i, tempssid, rb->next, err);
-        hexdump(stdout, tempssid, strlen(tempssid) + 1, 16, 8);
+        printf("Just wrote ssid %ld at 0x%lx stat=%d\n%s\n", i, rb->next, err, tempssid);
+        // hexdump(stdout, tempssid, strlen(tempssid) + 1, 16, 8);
         if (err != RB_OK) {
             printf("some write failure %d\n", err);
             if (err == RB_HDR_LOOP) {

@@ -177,7 +177,7 @@ if there is not enough room.
 */
 static rb_errors_t rb_findnext_writeable(rb_t *rb) {
     rb_header hdr;
-    uint32_t origrb = FLASH_SECTOR(rb->next); //start of this page
+    uint32_t origrb = rb->next; //start of this page
     assert(rb->next < rb->number_of_bytes);
     rb_errors_t hdr_res = RB_BAD_HDR;
     if (rb == NULL ) {
@@ -198,7 +198,7 @@ static rb_errors_t rb_findnext_writeable(rb_t *rb) {
         rb->next = rb_incr(rb->next, hdr.len + sizeof(hdr), rb->number_of_bytes);
 //fixme in a single sector system can I detect  a full sector? the following 
 //worked for multi sectors.
-        if (FLASH_SECTOR(rb->next) == origrb){
+        if (rb->next == origrb){
             //data in flash is full, we wrapped.
             rb->next = FLASH_SECTOR(rb->next);
             return RB_HDR_LOOP;
@@ -456,6 +456,7 @@ int rb_find(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *scra
         }
         //found next entry, read it into scratch buffer
         uint32_t oldnext = rb->next;
+        // rb->next += sizeof(hdr);
         hdr_res = rb_read(rb, id, scratch, size);
         if (hdr_res > 0) {
             // now see if it is the correct entry, and found.
@@ -482,6 +483,7 @@ rb_errors_t rb_smudge(rb_t *rb, uint32_t offset_to_smudge) {
     //overwrite the old crc byte clearing the smudge bit
     hdr.crc &= ~RB_HEADER_NOT_SMUDGED;
     rb->next += offsetof(rb_header, crc);
+    printf("rb_smudge erasing %ld\n", rb->next);
     int res = rb_append_page(rb, &hdr.crc, 1);
     rb->next = savenext; //fixme I am not sure I need this, but it shouldn't hurt.
     return res;
@@ -501,9 +503,9 @@ rb_errors_t rb_delete(rb_t *rb, uint8_t id, const void *data, uint32_t size, uin
     int res = rb_find(rb, id, data, size, pagebuffer);
     if (res < 0) {
         //some error
-        printf("some read failure %d looking for %s\n", -res, (char *) data);
+        printf("some read failure %d looking for \"%s\"\n", -res, (char *) data);
     } else {
-        printf("erasing \n%s\n", (char *) data);
+        printf("rb_delete erasing\n%s\n", (char *) data);
         res = rb_smudge(rb, res); //this deletes the entry
     }
         return -res;
@@ -600,7 +602,8 @@ rb_errors_t rb_create(rb_t *rb, uint32_t base_address,
     rb->next = 0;
 
     if (init_choice == CREATE_INIT_ALWAYS) {
-        flash_erase(rb->base_address, rb->number_of_bytes);
+        printf("************initing flash addr 0x%lx, len 0x%lx\n", rb->base_address, rb->number_of_bytes);
+         flash_erase(rb->base_address, rb->number_of_bytes);
         hdr_err = RB_OK;
     } else {
         /* Request was to continue in rb as exists in flash. First verify flash
@@ -622,7 +625,7 @@ rb_errors_t rb_recreate(rb_t *rb, uint32_t base_address,
     rb_errors_t err = rb_create(rb, base_address, number_of_sectors, init_choice, write_choice);
     if (init_choice != CREATE_FAIL) {
         if (!(err == RB_OK || err == RB_BLANK_HDR || err == RB_HDR_LOOP)) {
-            printf("starting flash error %d, reiniting\n", err);
+            printf("*****************starting flash error %d, reiniting\n", err);
             err = rb_create(rb, base_address, number_of_sectors, CREATE_INIT_ALWAYS, write_choice);
             if (err != RB_OK) {
                 //init failed, bail
