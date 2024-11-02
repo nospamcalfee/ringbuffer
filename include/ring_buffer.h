@@ -23,7 +23,7 @@
 typedef uint64_t (*timestamp_extractor_t)(void *entry);
 
 /* 
- reengineered to allow variable length flash storage.
+ re-engineered to allow variable length flash storage.
  The linker should declare flash sectors and locations, but
  the user can have multiple flash rings set up with cb_create
 
@@ -43,7 +43,7 @@ typedef uint64_t (*timestamp_extractor_t)(void *entry);
  so caller can erase and start over.
 
  Erased sectors are all 0xff bytes. Sectors start at the lowest addressed
- sector, and rb_header can be followed to find the last sector used on any
+ sector, and rb_header(s) can be followed to find the last sector used on any
  system startup
 
  Data rings start at the lowest sector allocated with a rb_sector_header and
@@ -61,18 +61,35 @@ typedef uint64_t (*timestamp_extractor_t)(void *entry);
  oldest. When the oldest is found, the internal data is skipped, until a new
  blank data area is found or the data area is full.
 
- Reads are kind of tricky. It is assumed that the user will (for any id) read the
- same amount as was written. It is generally intended that the ring buffering
- handling be invisible from the caller. He writes a bunch of bytes for an id
- and reads it back later. Flash pages, sectors and header gaps are not the
- applications problem.
+ Reads are kind of tricky. It is assumed that the user will (for any id) read
+ the same amount as was written. A request that asks for more data than was
+ read will return the actual amount read. It is generally intended that the ring
+ buffering handling be invisible from the caller. He writes a bunch of bytes
+ for an id and reads it back later. Flash pages, sectors and header gaps are
+ not the applications problem.
 
- FIXME - as an improvement any size reads should be attempted. If the read
- request is too short, the buffer pointers should skip to the end of the id
- data. If the read request is too long (like for some utility program that did
- not actually write the data), the entire data storage should be read and the
- actual length of the read returned. This means the read should return negative
- numbers for errors and the actual length read on a successful read return.
+ If the read request is too short, the buffer pointers should skip to the end of
+ the id data. If the read request is too long (like for some utility program
+ that did not actually write the data), the entire flash data will be read and
+ the actual length of the read returned. This means the read should return
+ negative numbers for errors and the actual length read on a successful read
+ return.
+
+ The only write possible is an append to the end of the ring buffer. So appends
+ always will find the oldest data and add after that (if there is room).
+
+ Reads keep track of where the last read was completed, so multiple reads will
+ read subsequent records with a matching id. If the user wants to rewind and
+ restart reading a new rb_recreate used to set up the buffer pointers. The user
+ should not access the rb pointers.
+
+ rb_delete finds the next matching id (and if requested matching data). Then it
+ simply erases one bit in the record header marking the record as deleted.
+
+ One user ring buffer can be used for both reads and writes to the same flash
+ area, because the internal data is maintained separately. That is, the
+ internal write routines can do reads, but the external read pointer is
+ maintained.
 
 */
 
@@ -154,18 +171,12 @@ enum init_choices {
     CREATE_INIT_IF_FAIL,
     CREATE_INIT_ALWAYS,
 };
-enum write_choices {
-    READ_OPEN,
-    WRITE_OPEN,
-};
 
 rb_errors_t rb_create(rb_t *rb, uint32_t base_address,
-                      size_t number_of_sectors, enum init_choices init_choice,
-                            enum write_choices write_choice);
+                      size_t number_of_sectors, enum init_choices init_choice) ;
 //helper to create and re-create (if data is bad) a buffer control block
 rb_errors_t rb_recreate(rb_t *rb, uint32_t base_address,
-                            size_t number_of_sectors, enum init_choices init_choice,
-                            enum write_choices write_choice);
+                            size_t number_of_sectors, enum init_choices init_choice);
 //page buffer must be passed with a full page of temp buffer for writes
 rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
                       uint8_t *pagebuffer, bool erase_if_full);

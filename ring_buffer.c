@@ -483,7 +483,7 @@ rb_errors_t rb_smudge(rb_t *rb, uint32_t offset_to_smudge) {
     //overwrite the old crc byte clearing the smudge bit
     hdr.crc &= ~RB_HEADER_NOT_SMUDGED;
     rb->next += offsetof(rb_header, crc);
-    printf("rb_smudge erasing %ld\n", rb->next);
+    printf("rb_smudge erasing 0x%lx\n", rb->next);
     int res = rb_append_page(rb, &hdr.crc, 1);
     rb->next = savenext; //fixme I am not sure I need this, but it shouldn't hurt.
     return res;
@@ -503,9 +503,9 @@ rb_errors_t rb_delete(rb_t *rb, uint8_t id, const void *data, uint32_t size, uin
     int res = rb_find(rb, id, data, size, pagebuffer);
     if (res < 0) {
         //some error
-        printf("some read failure %d looking for \"%s\"\n", -res, (char *) data);
+        printf("some find failure %d looking for \"%s\"\n", -res, (char *) data);
     } else {
-        printf("rb_delete erasing\n%s\n", (char *) data);
+        printf("rb_delete erasing at 0x%lx\n%s\n", rb->next, (char *) data);
         res = rb_smudge(rb, res); //this deletes the entry
     }
         return -res;
@@ -580,13 +580,12 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
 }
 /* 
 Create a new variable sized ringbuffer control block, maybe erasing the whole
-thing. Also, for writes find the next writeable area. The difference between
-READ_OPEN, WRITE_OPEN is reads leaves the pointer at the oldest flash entry and
-writes leaves at the next blank entry.
+thing. Can be called at any time to re-init. Every init points to the oldest
+sector and first item in the sector. So for reads it is like a rewind. Appends
+will go to the end of the ring always.
 */
 rb_errors_t rb_create(rb_t *rb, uint32_t base_address, 
-                      size_t number_of_sectors, enum init_choices init_choice,
-                            enum write_choices write_choice) {
+                      size_t number_of_sectors, enum init_choices init_choice) {
     rb_errors_t hdr_err = RB_BAD_HDR;
 #ifdef PICO_FLASH_SIZE_BYTES
     if (number_of_sectors > PICO_FLASH_SIZE_BYTES / FLASH_SECTOR_SIZE) {
@@ -603,30 +602,24 @@ rb_errors_t rb_create(rb_t *rb, uint32_t base_address,
 
     if (init_choice == CREATE_INIT_ALWAYS) {
         printf("************initing flash addr 0x%lx, len 0x%lx\n", rb->base_address, rb->number_of_bytes);
-         flash_erase(rb->base_address, rb->number_of_bytes);
+        flash_erase(rb->base_address, rb->number_of_bytes);
         hdr_err = RB_OK;
     } else {
         /* Request was to continue in rb as exists in flash. First verify flash
            is in reasonable order. */
         hdr_err = rb_find_ring_oldest_sector(rb);
-        if (hdr_err == RB_OK || hdr_err == RB_BLANK_HDR) {
-            if (write_choice == WRITE_OPEN) {
-                hdr_err = rb_findnext_writeable(rb);
-            }
-        }
     }
     //it is up to the user to deal with rb errors
     return hdr_err;
 }
 //helper to create and re-create (if data is bad) a buffer control block
 rb_errors_t rb_recreate(rb_t *rb, uint32_t base_address,
-                            size_t number_of_sectors, enum init_choices init_choice,
-                            enum write_choices write_choice) {
-    rb_errors_t err = rb_create(rb, base_address, number_of_sectors, init_choice, write_choice);
+                            size_t number_of_sectors, enum init_choices init_choice) {
+    rb_errors_t err = rb_create(rb, base_address, number_of_sectors, init_choice);
     if (init_choice != CREATE_FAIL) {
         if (!(err == RB_OK || err == RB_BLANK_HDR || err == RB_HDR_LOOP)) {
             printf("*****************starting flash error %d, reiniting\n", err);
-            err = rb_create(rb, base_address, number_of_sectors, CREATE_INIT_ALWAYS, write_choice);
+            err = rb_create(rb, base_address, number_of_sectors, CREATE_INIT_ALWAYS);
             if (err != RB_OK) {
                 //init failed, bail
                 printf("starting flash error %d, quitting\n", err);
