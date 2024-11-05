@@ -45,18 +45,18 @@ float read_onboard_temperature(const char unit) {
 
     return -1.0f;
 }
-//need a pagebuff per writer, but only one writer per flash allocation
+//need a pagebuff to do a write/delete but it is not needed between calls, everyone can use it.
 static uint8_t pagebuff[FLASH_PAGE_SIZE];
-static uint8_t ssidbuf[FLASH_PAGE_SIZE]; //fixme do we need 2 write buffers?
+
 static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
     uint64_t timestamp = time_us_64();
     float temperature = read_onboard_temperature(TEMPERATURE_UNITS);
     cb_entry_t entry;
     entry.timestamp = timestamp;
     entry.data = temperature;
-    printf("writing timestamp=%.1f,temperature=%.2f size=0x%lx ", (double)entry.timestamp / 1000000, entry.data, size);
+    printf("Writing timestamp=%.1f,temperature=%.2f size=0x%lx ", (double)entry.timestamp / 1000000, entry.data, size);
     rb_errors_t err = rb_append(rb, 0x7, data, size, pagebuff, true);
-    printf("Just wrote at  0x%lx stat=%d\n", rb->next, err);
+    printf(" stat=%d\n", err);
     // hexdump(stdout, rb, 16, 16, 8);
     if (err != RB_OK) {
         printf("some write failure %d\n", err);
@@ -98,7 +98,6 @@ const char *test_strings[] = {
 };
 #define SSID_TEST_WRITES 7
 static rb_t write_rb; //keep the buffer off the stack
-static rb_t read_rb; //keep the buffer off the stack
 static rb_t ssid_rb; //keep the buffer off the stack
 static uint8_t workdata[FLASH_SECTOR_SIZE]; //local data for transferring
 /*
@@ -115,10 +114,10 @@ static int read_ssids(rb_t *rb){
     }
     uint32_t loopcount = 0;
     while (true) {
-        err = rb_read(rb, SSID_ID, ssidbuf, sizeof(ssidbuf));
+        err = rb_read(rb, SSID_ID, pagebuff, sizeof(pagebuff));
 
-        printf("Reading ssid %ld at 0x%lx stat=%d\n\"%s\"\n", loopcount, rb->next, err, ssidbuf);
-        // hexdump(stdout, ssidbuf, err + 1, 16, 8);
+        printf("Reading ssid %ld at 0x%lx stat=%d\n\"%s\"\n", loopcount, rb->next, err, pagebuff);
+        // hexdump(stdout, pagebuff, err + 1, 16, 8);
         if (err <= 0) {
             printf("some read failure %d\n", err);
             break;
@@ -158,7 +157,7 @@ static int read_ssids(rb_t *rb){
         strcat(tempssid, "\n");
         wrcnt++;
         rb_errors_t err = rb_append(rb, SSID_ID, tempssid, strlen(tempssid) + 1,
-                                    ssidbuf, true);
+                                    pagebuff, true);
         printf("Just wrote ssid %ld at 0x%lx stat=%d\n%s\n", i, rb->next, err, tempssid);
         // hexdump(stdout, tempssid, strlen(tempssid) + 1, 16, 8);
         if (err != RB_OK) {
@@ -174,10 +173,10 @@ static int read_ssids(rb_t *rb){
 }
 
 // #define TEST_SIZE (4096-4-4)
-// #define TEST_SIZE (1)
+#define TEST_SIZE (1)
 // #define TEST_SIZE (190)
 // #define TEST_SIZE (1024-7)
-#define TEST_SIZE (1024*3-7)
+// #define TEST_SIZE (1024*3-7)
 int main(void) {
     int loopcount = 0;
     stdio_init_all();
@@ -197,7 +196,7 @@ int main(void) {
     write_ssids(&ssid_rb);
     read_ssids(&ssid_rb);
     for (uint32_t i = 0; i < ARRAY_LENGTH(test_strings); i++) {
-        err = rb_delete(&ssid_rb, SSID_ID, (const uint8_t *)test_strings[i], strlen(test_strings[i]), ssidbuf);
+        err = rb_delete(&ssid_rb, SSID_ID, (const uint8_t *)test_strings[i], strlen(test_strings[i]), pagebuff);
         if (err == RB_OK) {
             break;
         }
@@ -218,19 +217,8 @@ int main(void) {
                 exit(2);
             }
         }
-        if (read_rb.number_of_bytes == 0) {
-            //first time through, or write reinited, init the read buffer
-            err = rb_recreate(&read_rb, TEST_BUFF, TEST_LEN / FLASH_SECTOR_SIZE,
-                            CREATE_FAIL); //start over
-            if (err != RB_OK && err != RB_BLANK_HDR) {
-                //some failure, maybe need to wait for writer task?
-                printf("some read init failure %d, quitting\n", err);
-                exit(3);
-            }
-        } else {
-            err = reader(&read_rb, workdata, TEST_SIZE);
-            if (err != RB_OK) read_rb.next = 0;         
-        }
+        err = reader(&write_rb, workdata, TEST_SIZE);
+        if (err != RB_OK) write_rb.next = 0;
         sleep_ms(1000);
     }
 }
