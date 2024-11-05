@@ -77,7 +77,7 @@ rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
     }
     return -err;
 }
-//alocate first page as ssid storage, rest for test data
+//allocate first page as ssid storage, rest for test data
 #define SSID_BUFF (__PERSISTENT_TABLE)
 #define SSID_LEN FLASH_SECTOR_SIZE
 #define TEST_BUFF (__PERSISTENT_TABLE + FLASH_SECTOR_SIZE)
@@ -97,7 +97,7 @@ const char *test_strings[] = {
     "F",
 };
 #define SSID_TEST_WRITES 7
-static rb_t write_rb; //keep the buffer off the stack
+static rb_t slow_rb; //keep the buffer off the stack
 static rb_t ssid_rb; //keep the buffer off the stack
 static uint8_t workdata[FLASH_SECTOR_SIZE]; //local data for transferring
 /*
@@ -131,8 +131,8 @@ static int read_ssids(rb_t *rb){
 }
 //if ssids are not in flash, write them
 //for safety write both the ssid and the password as 2 strings to flash
-    static int wrcnt;
-    static int write_ssids(rb_t *rb) {
+static int wrcnt;
+static int write_ssids(rb_t *rb) {
     //first read existing ssids, see if all full for 3 wifi groups
     //that means read 6 strings, which are ssid, then password
     char tempssid[64]; //note this comes on a very small cpu stack of 4k - ok for a test.
@@ -184,7 +184,7 @@ int main(void) {
     adc_set_temp_sensor_enabled(true);
     adc_select_input(4);
 
-    rb_errors_t err = rb_recreate(&write_rb, TEST_BUFF, TEST_LEN / FLASH_SECTOR_SIZE,
+    rb_errors_t err = rb_recreate(&slow_rb, TEST_BUFF, TEST_LEN / FLASH_SECTOR_SIZE,
                                CREATE_INIT_IF_FAIL);
     if (!(err == RB_OK || err == RB_BLANK_HDR || err == RB_HDR_LOOP)) {
         printf("starting flash error %d, quitting\n", err);
@@ -207,7 +207,7 @@ int main(void) {
         for (uint32_t i = 0; i < sizeof(workdata); i++) {
             workdata[i] = (uint8_t) i;
         }
-        err = writer(&write_rb, workdata, TEST_SIZE);
+        err = writer(&slow_rb, workdata, TEST_SIZE);
         if (err != RB_OK && loopcount++ > 60) {
             loopcount = 0;
             printf("flash error %d, reiniting rolling over to first sector\n", err);
@@ -217,8 +217,8 @@ int main(void) {
                 exit(2);
             }
         }
-        err = reader(&write_rb, workdata, TEST_SIZE);
-        if (err != RB_OK) write_rb.next = 0;
+        err = reader(&slow_rb, workdata, TEST_SIZE);
+        if (err != RB_OK) slow_rb.next = 0;
         sleep_ms(1000);
     }
 }

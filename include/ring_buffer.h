@@ -186,7 +186,7 @@ int rb_find(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *scra
 rb_errors_t rb_delete(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *pagebuffer);
 
 //get defines from the .ld link map
-//users can divide this flash space s they wish
+//users can divide this flash space as they wish
 extern char __flash_persistent_start;
 extern char __flash_persistent_length;
 #define __PERSISTENT_TABLE  ((uint32_t) &__flash_persistent_start)
