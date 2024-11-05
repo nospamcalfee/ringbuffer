@@ -65,20 +65,17 @@ static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
 }
 
 rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
-    rb_errors_t err = RB_OK;
-    do {
-        uint32_t oldnext = rb->next;
-        int res = rb_read(rb, 7, data, size);
-        if (res < 0) err = -res;
-        printf("Just read from 0x%lx to 0x%lx stat=%d size=%d\n", oldnext, rb->next, err, res);
-        if (err == RB_OK) {
-            hexdump(stdout, data, MIN(size, 8), 16, 8);
-            return err; //return after 1 read
-        } else {
-            printf("some read failure, stop reading %d\n", err);
-        }
-    } while (err == RB_OK);
-    return err;
+    int err;
+    uint32_t oldnext = rb->next;
+    err = rb_read(rb, 7, data, size);
+    if (err >= 0) {
+        printf("Just read from 0x%lx to 0x%lx stat=%d size=0x%x\n", oldnext, rb->next, -err, err);
+        hexdump(stdout, data, MIN(size, 8), 16, 8);
+        return RB_OK; //return after 1 read
+    } else {
+        printf("some read failure, stop reading %d\n", -err);
+    }
+    return -err;
 }
 //alocate first page as ssid storage, rest for test data
 #define SSID_BUFF (__PERSISTENT_TABLE)
@@ -176,14 +173,6 @@ static int read_ssids(rb_t *rb){
     return err;
 }
 
-/* function to delete a specific written record, which matches id and the
-   entire data matches the data field. Needs a scratch buffer for reads,
-   matches data to scratch AND id, then smudges the flash entry.
-*/
-rb_errors_t erase_ssid(rb_t *rb, uint8_t id, const uint8_t *data, uint32_t size, uint8_t *scratch){
-    int err = rb_delete(rb, id, data, size, scratch);
-    return err;
-}
 // #define TEST_SIZE (4096-4-4)
 // #define TEST_SIZE (1)
 // #define TEST_SIZE (190)
@@ -208,7 +197,7 @@ int main(void) {
     write_ssids(&ssid_rb);
     read_ssids(&ssid_rb);
     for (uint32_t i = 0; i < ARRAY_LENGTH(test_strings); i++) {
-        err = erase_ssid(&ssid_rb, SSID_ID, (const uint8_t *)test_strings[i], strlen(test_strings[i]), ssidbuf);
+        err = rb_delete(&ssid_rb, SSID_ID, (const uint8_t *)test_strings[i], strlen(test_strings[i]), ssidbuf);
         if (err == RB_OK) {
             break;
         }

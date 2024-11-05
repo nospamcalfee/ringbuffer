@@ -404,6 +404,7 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
     }
 
     rb->rb_page = pagebuffer; //set temp pointer
+    uint32_t oldnext = rb->next;
     //rbcreate and other appends guarantee pointers are good in rb
     hdr_res = rb_findnext_writeable(rb); //get pointers in rb
     if (hdr_res == RB_HDR_LOOP && erase_if_full) {
@@ -430,6 +431,7 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
         }
         break; //done with loop
     } while (1);
+    rb->next = oldnext;
     return hdr_res;
 }
 /* search flash for an existing entry id and data match. return positive offset
@@ -472,7 +474,7 @@ int rb_find(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *scra
 //this function effectively deletes a flash record, by smudging it, which can be
 //done after it is already written. Due to nand flash implementations, I can
 //write 1 bits to 0 bits, but not vice-versa
-rb_errors_t rb_smudge(rb_t *rb, uint32_t offset_to_smudge) {
+static rb_errors_t rb_smudge(rb_t *rb, uint32_t offset_to_smudge) {
     rb_header hdr;
     uint32_t savenext = rb->next;
     rb->next = offset_to_smudge;
@@ -495,6 +497,7 @@ rb_errors_t rb_delete(rb_t *rb, uint8_t id, const void *data, uint32_t size, uin
         return RB_BAD_CALLER_DATA;
     }
     rb->rb_page = pagebuffer; //set temp area pointer
+    uint32_t oldnext = rb->next;
     //I think it makes sense to always delete the first match?
     rb_errors_t hdr_err = rb_find_ring_oldest_sector(rb);
     if (hdr_err != RB_OK) {
@@ -508,7 +511,8 @@ rb_errors_t rb_delete(rb_t *rb, uint8_t id, const void *data, uint32_t size, uin
         printf("rb_delete erasing at 0x%lx\n%s\n", rb->next, (char *) data);
         res = rb_smudge(rb, res); //this deletes the entry
     }
-        return -res;
+    rb->next = oldnext;
+    return -res;
 }
 /*
     read up to size data bytes into data buffer, of next flash which matches id.
@@ -560,23 +564,17 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size) {
                 if (hdr.id == id && (hdr.crc & RB_HEADER_SPLIT)) {
                     // I have peeked ahead and this data is split into the next
                     // sector, so recurse to read rest of it.
-                    hdr_res = rb_read(rb, id, data, remaining_size);
-                    //fixme - combine with previous reads
-                    if (hdr_res > 0) {
-                        total_read += hdr_res;
+                    int res = rb_read(rb, id, data, remaining_size);
+                    if (res > 0) {
+                        total_read += res; //fixme - this only will work once
                     }
-                    break;
                 }
             }
         }
         break;
     } while (1);
-    if (hdr_res == RB_OK) {
-        //If returned data is too long or short return actual size
-        return total_read;
-    } else {
-        return -hdr_res;
-    }
+    //If returned data is too short return actual size
+    return total_read;
 }
 /* 
 Create a new variable sized ringbuffer control block, maybe erasing the whole
