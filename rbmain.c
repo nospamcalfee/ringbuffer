@@ -56,7 +56,7 @@ static rb_errors_t writer(rb_t *rb, uint8_t *data, uint32_t size) {
     entry.data = temperature;
     printf("Writing timestamp=%.1f,temperature=%.2f size=0x%lx ", (double)entry.timestamp / 1000000, entry.data, size);
     rb_errors_t err = rb_append(rb, 0x7, data, size, pagebuff, true);
-    printf(" stat=%d\n", err);
+    printf(" @0x%lx stat=%d\n", rb->last_wrote, err);
     // hexdump(stdout, rb, 16, 16, 8);
     if (err != RB_OK) {
         printf("some write failure %d\n", err);
@@ -78,10 +78,15 @@ rb_errors_t reader(rb_t *rb, uint8_t *data, uint32_t size) {
     return -err;
 }
 //allocate first page as ssid storage, rest for test data
+// #define SSID_BUFF (__PERSISTENT_TABLE)
+// #define SSID_LEN FLASH_SECTOR_SIZE
+// #define TEST_BUFF (__PERSISTENT_TABLE + FLASH_SECTOR_SIZE)
+// #define TEST_LEN (__PERSISTENT_LEN - SSID_LEN)
+//test sharing just one buffer
 #define SSID_BUFF (__PERSISTENT_TABLE)
-#define SSID_LEN FLASH_SECTOR_SIZE
-#define TEST_BUFF (__PERSISTENT_TABLE + FLASH_SECTOR_SIZE)
-#define TEST_LEN (__PERSISTENT_LEN - SSID_LEN)
+#define SSID_LEN __PERSISTENT_LEN
+#define TEST_BUFF (__PERSISTENT_TABLE)
+#define TEST_LEN (__PERSISTENT_LEN)
 
 #define SSID_ID 0x3a
 //ssid save and recover tests
@@ -116,7 +121,7 @@ static int read_ssids(rb_t *rb){
     while (true) {
         err = rb_read(rb, SSID_ID, pagebuff, sizeof(pagebuff));
 
-        printf("Reading ssid %ld at 0x%lx stat=%d\n\"%s\"\n", loopcount, rb->next, err, pagebuff);
+        printf("Reading ssid %ld starting at 0x%lx stat=%d\n\"%s\"\n", loopcount, rb->next, err, pagebuff);
         // hexdump(stdout, pagebuff, err + 1, 16, 8);
         if (err <= 0) {
             printf("some read failure %d\n", err);
@@ -132,19 +137,19 @@ static int read_ssids(rb_t *rb){
 //if ssids are not in flash, write them
 //for safety write both the ssid and the password as 2 strings to flash
 static int wrcnt;
-static int write_ssids(rb_t *rb) {
-    //first read existing ssids, see if all full for 3 wifi groups
-    //that means read 6 strings, which are ssid, then password
-    char tempssid[64]; //note this comes on a very small cpu stack of 4k - ok for a test.
-    uint32_t good_reads =  read_ssids(rb);
+void create_ssid_rb(rb_t *rb, enum init_choices ssid_choice) {
     // create another write/read set of control buffers for an alternative flash buffer containing strings
-    //fixme do I need this reopen?
-    int err = rb_recreate(rb, SSID_BUFF, SSID_LEN / FLASH_SECTOR_SIZE,
-                                  CREATE_INIT_IF_FAIL);
+    int err = rb_recreate(rb, SSID_BUFF, SSID_LEN / FLASH_SECTOR_SIZE, ssid_choice);
     if (!(err == RB_OK || err == RB_BLANK_HDR || err == RB_HDR_LOOP)) {
         printf("starting flash error %d, quitting\n", err);
         exit(1);
     }
+}
+static rb_errors_t write_ssids(rb_t *rb) {
+    //first read existing ssids, see if all full for 3 wifi groups
+    //that means read 6 strings, which are ssid, then password
+    char tempssid[64]; //note this comes on a very small cpu stack of 4k - ok for a test.
+    uint32_t good_reads =  read_ssids(rb);
 
     //less than required number of strings, write more.
     for (uint32_t i = good_reads; i < SSID_TEST_WRITES; i++) {
@@ -158,25 +163,33 @@ static int write_ssids(rb_t *rb) {
         wrcnt++;
         rb_errors_t err = rb_append(rb, SSID_ID, tempssid, strlen(tempssid) + 1,
                                     pagebuff, true);
-        printf("Just wrote ssid %ld at 0x%lx stat=%d\n%s\n", i, rb->next, err, tempssid);
+        printf("Just wrote ssid %ld at 0x%lx stat=%d\n%s\n", i, rb->last_wrote, err, tempssid);
         // hexdump(stdout, tempssid, strlen(tempssid) + 1, 16, 8);
         if (err != RB_OK) {
-            printf("some write failure %d\n", err);
+            // printf("some write failure %d\n", err);
             if (err == RB_HDR_LOOP) {
                 //not enough room, let caller handle it
                 printf("not enough room err=%d, let caller handle it\n", err);
-                return err;
+            } else {
+                printf("some bad write error=%d\n",err);
             }
+            return err;
         }
     }
-    return err;
+    //and write another, with a different id for read/write tests
+    tempssid[0] = '\x61';
+    rb_errors_t terr = rb_append(rb, SSID_ID + 7, tempssid, strlen(tempssid) + 1,
+                                pagebuff, true);
+    printf("finally wrote ssid 0x%x at 0x%lx stat=%d\n%s\n", SSID_ID + 7, rb->last_wrote, terr, tempssid);
+
+    return terr;
 }
 
 // #define TEST_SIZE (4096-4-4)
-#define TEST_SIZE (1)
+// #define TEST_SIZE (1)
 // #define TEST_SIZE (190)
 // #define TEST_SIZE (1024-7)
-// #define TEST_SIZE (1024*3-7)
+#define TEST_SIZE (1024*3-7)
 int main(void) {
     int loopcount = 0;
     stdio_init_all();
@@ -190,10 +203,15 @@ int main(void) {
         printf("starting flash error %d, quitting\n", err);
         exit(1);
     }
+    create_ssid_rb(&ssid_rb, CREATE_INIT_IF_FAIL);
+
     sleep_ms(4000);
     printf("linker defined persistent area 0x%lx, len 0x%lx st=%d\n", __PERSISTENT_TABLE, __PERSISTENT_LEN, err);
     sleep_ms(1000);
-    write_ssids(&ssid_rb);
+    if (write_ssids(&ssid_rb) != RB_OK) {
+        //writes that fail are bad, reinit the flash
+        create_ssid_rb(&ssid_rb, CREATE_INIT_ALWAYS);
+    }
     read_ssids(&ssid_rb);
     for (uint32_t i = 0; i < ARRAY_LENGTH(test_strings); i++) {
         err = rb_delete(&ssid_rb, SSID_ID, (const uint8_t *)test_strings[i], strlen(test_strings[i]), pagebuff);
@@ -211,6 +229,8 @@ int main(void) {
         if (err != RB_OK && loopcount++ > 60) {
             loopcount = 0;
             printf("flash error %d, reiniting rolling over to first sector\n", err);
+            rb_errors_t err = rb_recreate(&slow_rb, TEST_BUFF, TEST_LEN / FLASH_SECTOR_SIZE,
+                           CREATE_INIT_ALWAYS);
              if (err != RB_OK) {
                 //init failed, bail
                 printf("flash error %d, quitting\n", err);

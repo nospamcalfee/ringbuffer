@@ -179,7 +179,7 @@ static rb_errors_t rb_findnext_writeable(rb_t *rb) {
     rb_header hdr;
     uint32_t origrb = rb->next; //start of this page
     assert(rb->next < rb->number_of_bytes);
-    rb_errors_t hdr_res = RB_BAD_HDR;
+    rb_errors_t hdr_res;
     if (rb == NULL ) {
         return RB_BAD_CALLER_DATA; // Error handling: Null pointer passed
     }
@@ -190,11 +190,10 @@ static rb_errors_t rb_findnext_writeable(rb_t *rb) {
         }
         hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
         if (hdr_res != RB_OK) {
-            return hdr_res; //return errors here
+            break; //return hdr_res; //return errors and RB_BLANK_HDR here
          }
         //found a good header, use it to skip ahead
         //keep looking for end of rb
-        uint32_t oldnext = rb->next;
         rb->next = rb_incr(rb->next, hdr.len + sizeof(hdr), rb->number_of_bytes);
 //fixme in a single sector system can I detect  a full sector? the following 
 //worked for multi sectors.
@@ -202,17 +201,6 @@ static rb_errors_t rb_findnext_writeable(rb_t *rb) {
             //data in flash is full, we wrapped.
             rb->next = FLASH_SECTOR(rb->next);
             return RB_HDR_LOOP;
-        }
-        hdr_res = fetch_and_check_header(rb, &hdr, 0);
-        if (hdr_res != RB_OK && hdr_res != RB_BLANK_HDR) {
-            return hdr_res;
-        }
-        if (FLASH_SECTOR(rb->next) != FLASH_SECTOR(oldnext)) {
-            // if we wrap to next sector, fixup to match required sector header
-            hdr_res = fetch_and_check_header(rb, &hdr, 0); //fetch and check header
-            if (hdr_res != RB_OK && hdr_res != RB_BLANK_HDR) {
-                return hdr_res;
-            }
         }
     } while (1);
     return hdr_res;
@@ -229,7 +217,7 @@ static rb_errors_t rb_find_ring_oldest_sector(rb_t *rb) {
     uint32_t oldnext = 0;
     rb_sector_header hdr;
     rb_errors_t hdr_res = RB_BAD_HDR;
-    int oldest_sector_number = RB_INDEX_MASK; //largest possible index
+    uint32_t oldest_sector_number = RB_INDEX_MASK; //largest possible index
     if (rb == NULL ) {
         return RB_BAD_CALLER_DATA; // Error handling: Null pointer passed
     }
@@ -252,6 +240,10 @@ static rb_errors_t rb_find_ring_oldest_sector(rb_t *rb) {
                 //lower indexes are always older
                 oldest_sector_number = get_index(&hdr);
                 oldnext = rb->next; //save ptr to oldest
+            }
+            if (get_index(&hdr) >= rb->sector_index) {
+                //update largest index for new sector creation
+                rb->sector_index = get_index(&hdr);
             }
             break;
         case RB_BLANK_HDR: //header is erased, keep looking
@@ -280,7 +272,7 @@ static int rb_partial(rb_t *rb, const void *data, uint32_t size) {
     //write buffered page into flash
     flash_prog(rb->base_address + FLASH_PAGE(rb->next), rb->rb_page, FLASH_PAGE_SIZE);
     memset(rb->rb_page, 0xff, FLASH_PAGE_SIZE); //get page buffer ready
-nextincr(rb, wrlen);
+    nextincr(rb, wrlen);
     return size - wrlen; //amount not written
 }
 /*
@@ -315,6 +307,7 @@ static rb_errors_t rb_append_page(rb_t *rb, const void *data, uint32_t size) {
 static rb_errors_t write_headers(rb_t *rb, rb_header * hdr, uint32_t size, uint8_t flag) {
     rb_errors_t hdr_res;
     rb_sector_header rbsh;
+    rb->last_wrote = rb->next; //info to caller
     if (MOD_SECTOR(rb->next) == 0) {
         hdr_res = make_sector_header(rb, &rbsh);
         hdr_res = rb_append_page(rb, &rbsh, sizeof(rbsh));
@@ -338,7 +331,6 @@ static rb_errors_t write_headers(rb_t *rb, rb_header * hdr, uint32_t size, uint8
 */
 static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data, uint32_t size) {
     rb_errors_t hdr_res;
-    // int id = hdr->id;
     int hdrsize = sizeof(*hdr);
     uint32_t size_needed = size + hdrsize;;
     if (rb == NULL || data == NULL || size == 0 || hdr == NULL ||
@@ -360,6 +352,7 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
         //fixme assumes will not be more than 2 sectors.
         rb_header rbh2;
         uint32_t size_in_first_sector = FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next) - hdrsize;
+        size_in_first_sector = MIN(size_in_first_sector, size);
         uint32_t nextsector =  FLASH_SECTOR(rb->next) + FLASH_SECTOR_SIZE;
         if (nextsector >= rb->number_of_bytes) {
             nextsector = 0; //wrap to first sector allocated
@@ -378,10 +371,22 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
             if (hdr_res != RB_OK){
                 return hdr_res;
             }
-           //second write new sector header, split data header.
-            hdr_res = write_headers(rb, hdr, size - size_in_first_sector,
+            //second write next sector header, split data header.
+            uint32_t size_in_second_sector = size - size_in_first_sector;
+            size_in_second_sector = MIN(size_in_second_sector,
+                                        FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next) - hdrsize);
+
+            hdr_res = write_headers(rb, hdr, size - size_in_second_sector,
                                     RB_HEADER_SPLIT | RB_HEADER_NOT_SMUDGED);
-            hdr_res = rb_append_page(rb, data + size_in_first_sector, size - size_in_first_sector);
+            //write second sector.
+            hdr_res = rb_append_page(rb, data + size_in_second_sector, size_in_second_sector);
+            if (size - size_in_second_sector > 0) {
+                //recurse and write remainder
+                hdr_res = rb_sector_append(rb, hdr, data + size_in_second_sector, size - size_in_second_sector);
+                if (hdr_res != RB_OK) {
+                    return hdr_res;
+                }
+            }
         } else {
             // not enough space is available, let caller know so he can erase.
             rb->next = savenext;
@@ -406,26 +411,26 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
     rb->rb_page = pagebuffer; //set temp pointer
     uint32_t oldnext = rb->next;
     //rbcreate and other appends guarantee pointers are good in rb
-    hdr_res = rb_findnext_writeable(rb); //get pointers in rb
-    if (hdr_res == RB_HDR_LOOP && erase_if_full) {
-        nextincr(rb, FLASH_SECTOR_SIZE); //bump to next in ring
-        flash_erase(rb->base_address + rb->next, FLASH_SECTOR_SIZE);
-    }
     do {
         hdr_res = rb_findnext_writeable(rb); //get pointers in rb
+        if (hdr_res == RB_HDR_LOOP && erase_if_full) {
+            // nextincr(rb, FLASH_SECTOR_SIZE); //bump to next in ring
+            rb_find_ring_oldest_sector(rb);
+            // rb->next = FLASH_SECTOR(rb->next);
+            flash_erase(rb->base_address + rb->next, FLASH_SECTOR_SIZE);
+            hdr_res = RB_BLANK_HDR;
+        }
         if (hdr_res == RB_BLANK_HDR) {
-            //fixme add sector header if first in sector
             rbh.id = id; //only thing needed from here on the header
             hdr_res = rb_sector_append(rb, &rbh, data, size);
             if ((hdr_res == RB_WRAPPED_SECTOR_USED || hdr_res == RB_FULL) && erase_if_full) {
                 //erase next sector in ring
-                // we just found out a partial write was tried and then discovered it would not fit, cannot lose current pointer.
-                // nextincr(rb, FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next));
-                uint32_t offs = FLASH_SECTOR(rb->next) + FLASH_SECTOR_SIZE;
-                if (offs >= rb->number_of_bytes) {
-                    offs = 0; //wrap around flash allocation
-                }
-                flash_erase(rb->base_address + offs, FLASH_SECTOR_SIZE);
+                // uint32_t offs = FLASH_SECTOR(rb->next) + FLASH_SECTOR_SIZE;
+                // if (offs >= rb->number_of_bytes) {
+                //     offs = 0; //wrap around flash allocation
+                // }
+                rb_find_ring_oldest_sector(rb);
+                flash_erase(rb->base_address + rb->next, FLASH_SECTOR_SIZE);
                 continue; //try append again
             }
         }

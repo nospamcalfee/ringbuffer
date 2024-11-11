@@ -116,7 +116,7 @@ typedef struct {
 // static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_index(p) << 5 | (n & 0x1f);}
 static inline uint32_t get_crc (rb_sector_header *p) {return p->header & 0xff;}
 static inline void set_index (rb_sector_header *p, uint32_t n) { p->header = (n & RB_INDEX_MASK) << 8 | get_crc(p);}
-static inline int get_index (rb_sector_header *p) {return p->header >> 8;}
+static inline uint32_t get_index (rb_sector_header *p) {return p->header >> 8;}
 static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_index(p) << 8 | (n & 0xff);}
 
 #define HEADER_SIZE (sizeof(rb_header))
@@ -148,7 +148,8 @@ static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_i
 typedef struct {
     uint32_t base_address; //offset in flash, not system address
     uint32_t number_of_bytes;
-    uint32_t next; //working pointer into flash ring 0<=next<number_of_bytes
+    uint32_t next; //working read pointer into flash ring 0<=next<number_of_bytes
+    uint32_t last_wrote; //info for caller as to where in rb last written
     uint32_t sector_index; //track for ring wraps.
     uint8_t *rb_page; //only required for writes.
 } rb_t;
