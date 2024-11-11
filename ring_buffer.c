@@ -376,7 +376,7 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
             size_in_second_sector = MIN(size_in_second_sector,
                                         FLASH_SECTOR_SIZE - MOD_SECTOR(rb->next) - hdrsize);
 
-            hdr_res = write_headers(rb, hdr, size - size_in_second_sector,
+            hdr_res = write_headers(rb, hdr, size_in_second_sector,
                                     RB_HEADER_SPLIT | RB_HEADER_NOT_SMUDGED);
             //write second sector.
             hdr_res = rb_append_page(rb, data + size_in_second_sector, size_in_second_sector);
