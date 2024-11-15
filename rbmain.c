@@ -149,7 +149,7 @@ static rb_errors_t write_ssids(rb_t *rb) {
     //first read existing ssids, see if all full for 3 wifi groups
     //that means read 6 strings, which are ssid, then password
     char tempssid[64]; //note this comes on a very small cpu stack of 4k - ok for a test.
-    uint32_t good_reads =  read_ssids(rb);
+    uint32_t good_reads = SSID_TEST_WRITES - 1; //read_ssids(rb);
 
     //less than required number of strings, write more.
     for (uint32_t i = good_reads; i < SSID_TEST_WRITES; i++) {
@@ -187,9 +187,9 @@ static rb_errors_t write_ssids(rb_t *rb) {
 
 // #define TEST_SIZE (4096-4-4)
 // #define TEST_SIZE (1)
-// #define TEST_SIZE (190)
+#define TEST_SIZE (190)
 // #define TEST_SIZE (1024-7)
-#define TEST_SIZE (1024*3-7)
+// #define TEST_SIZE (1024*3-7)
 int main(void) {
     int loopcount = 0;
     stdio_init_all();
@@ -203,7 +203,7 @@ int main(void) {
         printf("starting flash error %d, quitting\n", err);
         exit(1);
     }
-    create_ssid_rb(&ssid_rb, CREATE_INIT_IF_FAIL);
+    create_ssid_rb(&ssid_rb, CREATE_FAIL);
 
     sleep_ms(4000);
     printf("linker defined persistent area 0x%lx, len 0x%lx st=%d\n", __PERSISTENT_TABLE, __PERSISTENT_LEN, err);
@@ -239,6 +239,12 @@ int main(void) {
         }
         err = reader(&slow_rb, workdata, TEST_SIZE);
         if (err != RB_OK) slow_rb.next = 0;
+        int ssid_stat = write_ssids(&ssid_rb);
+        if (ssid_stat != RB_OK) {
+            //writes that fail are bad, reinit the flash
+            // create_ssid_rb(&ssid_rb, CREATE_INIT_ALWAYS);
+            printf("write ssid failure = %d\n", ssid_stat);
+        }
         sleep_ms(1000);
     }
 }

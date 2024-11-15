@@ -210,8 +210,7 @@ static rb_errors_t rb_findnext_writeable(rb_t *rb) {
  will start in the first sector. For example secA secB, is the ring, either
  could be the oldest. But we know the ring order is from first sector to last
  always and then wrap back to the first. If there are no erased sectors the
- sector with the lowest number will be the oldest. If there is an erased sector
- the one before it in the ring is the oldest (unless it is also blank, etc.).
+ sector with the lowest number will be the oldest.
 */
 static rb_errors_t rb_find_ring_oldest_sector(rb_t *rb) {
     uint32_t oldnext = 0;
@@ -224,10 +223,14 @@ static rb_errors_t rb_find_ring_oldest_sector(rb_t *rb) {
     /*
         scan all sectors, return either the earliest blank sector or the oldest
         used.
-        If sectors are (7 erased 8), oldest is 7.
+        If sectors are (7 erased 8), oldest is 7, but badly ordered
+        If sectors are (8 erased 7), oldest is 7
         If sectors are (erased 9 10), oldest is 9.
         If sectors are (1 2 erased), oldest is 1.
+        If no sectors are erased (3 1 2), oldest is 1 (lowest)
         If all sectors are erased, oldest is the first sector
+        Erased sectors are always assumed grouped, generally only 1 sector
+        unless entire flash was erased.
     */
     int offs = rb->number_of_bytes - FLASH_SECTOR_SIZE; //start on last sector
     do {
@@ -246,7 +249,7 @@ static rb_errors_t rb_find_ring_oldest_sector(rb_t *rb) {
                 rb->sector_index = get_index(&hdr);
             }
             break;
-        case RB_BLANK_HDR: //header is erased, keep looking
+        case RB_BLANK_HDR: //header is erased
             break;
         default:
             return hdr_res; //some error finding start
@@ -256,6 +259,79 @@ static rb_errors_t rb_find_ring_oldest_sector(rb_t *rb) {
     //we have searched the ring, no hdr found, so start at ring start
     rb->next = oldnext;
     return hdr_res;
+}
+/*
+ check entire flash for reasonable order. ie oldest < next < nextnext etc, with
+ any sector startinq at blank, is followed by other sectors starting at blank.
+ Modulo the ring size.
+*/
+rb_errors_t rb_check_sector_ring(rb_t *rb) {
+    int blankcount = 0;
+    rb_errors_t check_status = RB_OK;
+    rb_sector_header hdr;
+    rb_errors_t hdr_res;
+    uint32_t oldest_sector_number = RB_INDEX_MASK; //largest possible index
+    uint32_t last_blank_sector = 0;
+
+    //first just check the sector headers, if bad, we will erase everything
+    //back through all sectors
+    // for (int i = rb->number_of_bytes - FLASH_SECTOR_SIZE; i >= 0 ; i -= FLASH_SECTOR_SIZE) {
+    for (uint32_t i = 0; i < rb->number_of_bytes; i += FLASH_SECTOR_SIZE) {
+        rb->next = i;
+        flash_read(rb->base_address + rb->next, &hdr, sizeof(hdr));
+        hdr_res = is_sector_header_good(&hdr);
+        if (hdr_res == RB_OK) {
+            if (get_index(&hdr) < oldest_sector_number) {
+                //lower indexes are always older
+                oldest_sector_number = get_index(&hdr);
+            }
+            if (get_index(&hdr) >= rb->sector_index) {
+                //update largest index for new sector creation
+                rb->sector_index = get_index(&hdr);
+            }
+        } else {
+            if (hdr_res == RB_BLANK_HDR) {
+                blankcount++;
+                last_blank_sector = i; //last erased in ring
+            } else {
+                //some bad error
+                check_status = RB_BAD_HDR;
+            }
+        }
+    }
+    //now starting at the last erased flash sector, go through flash again,
+    //insure sectors increase
+    if (blankcount == 0) {
+        hdr_res = rb_find_ring_oldest_sector(rb);
+        //should never be an error here
+        last_blank_sector = rb->next; //where the ring should start
+    }
+    uint32_t low = 0;
+    for (uint32_t i = 0; i < rb->number_of_bytes && check_status == RB_OK; i += FLASH_SECTOR_SIZE) {
+        rb->next = i + last_blank_sector;
+        if (rb->next > rb->number_of_bytes) {
+            rb->next -= rb->number_of_bytes; //wrap in ring buffer
+        }
+        flash_read(rb->base_address + rb->next, &hdr, sizeof(hdr));
+        hdr_res = is_sector_header_good(&hdr);
+        if (hdr_res == RB_OK) {
+            if (get_index(&hdr) < low) {
+                check_status = RB_BAD_HDR; //exit loop
+            }
+            low = get_index(&hdr); //move up low counter
+        } else {
+            //only non-ok is blank here
+            break;
+        }
+    }
+    //caller can erase if desired
+    // if (check_status != RB_OK) {
+    //     //something is wrong, erase the whole flash area
+    //     printf("!!!!!!!!initing flash addr 0x%lx, len 0x%lx\n", rb->base_address, rb->number_of_bytes);
+    //     flash_erase(rb->base_address, rb->number_of_bytes);
+    //     return check_status;
+    // }
+    return check_status;
 }
 /*
   Here I know entire write will be in this sector, maybe multiple pages. call
@@ -412,6 +488,10 @@ rb_errors_t rb_append(rb_t *rb, uint8_t id, const void *data, uint32_t size,
     uint32_t oldnext = rb->next;
     //rbcreate and other appends guarantee pointers are good in rb
     do {
+        hdr_res = rb_find_ring_oldest_sector(rb);
+        if (!(hdr_res == RB_OK || hdr_res == RB_BLANK_HDR)) {
+            return hdr_res;
+        }
         hdr_res = rb_findnext_writeable(rb); //get pointers in rb
         if (hdr_res == RB_HDR_LOOP && erase_if_full) {
             // nextincr(rb, FLASH_SECTOR_SIZE); //bump to next in ring
@@ -610,7 +690,11 @@ rb_errors_t rb_create(rb_t *rb, uint32_t base_address,
     } else {
         /* Request was to continue in rb as exists in flash. First verify flash
            is in reasonable order. */
-        hdr_err = rb_find_ring_oldest_sector(rb);
+        hdr_err = rb_check_sector_ring(rb);
+        if (hdr_err == RB_OK) {
+            //then set the pointer
+            hdr_err = rb_find_ring_oldest_sector(rb);
+        }
     }
     //it is up to the user to deal with rb errors
     return hdr_err;

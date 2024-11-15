@@ -39,8 +39,11 @@ typedef uint64_t (*timestamp_extractor_t)(void *entry);
  100,000 erases, I don't think we need to worry about wrapping the flash
  index - the flash will be dead by then anyway.
 
- Rings will be checked when used, if invalid, status is returned
- so caller can erase and start over.
+ Rings will be checked when used, if invalid, status is returned so caller can
+ erase and start over. Writes are especially risky and should be rare. If
+ multiple writers are used, the ring must be checked before every write. ring
+ buffer headers cache local accessor data, but not global, so must be rebuilt
+ before every write. Write speed will be sacrificed to assure data integrity.
 
  Erased sectors are all 0xff bytes. Sectors start at the lowest addressed
  sector, and rb_header(s) can be followed to find the last sector used on any
@@ -185,7 +188,7 @@ int rb_read(rb_t *rb, uint8_t id, void *data, uint32_t size);
 int rb_find(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *scratch);
 /* given a writeable page, delete a matching id, string entry */
 rb_errors_t rb_delete(rb_t *rb, uint8_t id, const void *data, uint32_t size, uint8_t *pagebuffer);
-
+rb_errors_t rb_check_sector_ring(rb_t *rb);
 //get defines from the .ld link map
 //users can divide this flash space as they wish
 extern char __flash_persistent_start;
