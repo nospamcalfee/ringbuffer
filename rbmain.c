@@ -104,7 +104,14 @@ const char *test_strings[] = {
 #define SSID_TEST_WRITES 7
 static rb_t slow_rb; //keep the buffer off the stack
 static rb_t ssid_rb; //keep the buffer off the stack
-static uint8_t workdata[FLASH_SECTOR_SIZE]; //local data for transferring
+// #define TEST_SIZE (4096-4-4)
+// #define TEST_SIZE 8000 fixme this test does not work
+// #define TEST_SIZE (1)
+// #define TEST_SIZE (190)
+#define TEST_SIZE (1024-7)
+// #define TEST_SIZE (1024*3-7)
+
+static uint8_t workdata[TEST_SIZE]; //local data for transferring
 /*
  read all ssids from flash. return number of successful reads or negative error
  status
@@ -185,11 +192,6 @@ static rb_errors_t write_ssids(rb_t *rb) {
     return terr;
 }
 
-// #define TEST_SIZE (4096-4-4)
-// #define TEST_SIZE (1)
-#define TEST_SIZE (190)
-// #define TEST_SIZE (1024-7)
-// #define TEST_SIZE (1024*3-7)
 int main(void) {
     int loopcount = 0;
     stdio_init_all();

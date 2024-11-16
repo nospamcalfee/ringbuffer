@@ -456,9 +456,11 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
                                     RB_HEADER_SPLIT | RB_HEADER_NOT_SMUDGED);
             //write second sector.
             hdr_res = rb_append_page(rb, data + size_in_second_sector, size_in_second_sector);
-            if (size - size_in_second_sector > 0) {
-                //recurse and write remainder
-                hdr_res = rb_sector_append(rb, hdr, data + size_in_second_sector, size - size_in_second_sector);
+            if (size - size_in_first_sector - size_in_second_sector > 0) {
+                //recurse and write remainder fixme will this work for writes greater than sector size?
+                hdr_res = rb_sector_append(rb, hdr,
+                            data + size_in_second_sector + size_in_first_sector,
+                            size - size_in_second_sector - size_in_first_sector);
                 if (hdr_res != RB_OK) {
                     return hdr_res;
                 }
