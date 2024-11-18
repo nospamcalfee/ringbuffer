@@ -410,7 +410,8 @@ static rb_errors_t rb_sector_append(rb_t *rb, rb_header * hdr, const void *data,
     int hdrsize = sizeof(*hdr);
     uint32_t size_needed = size + hdrsize;;
     if (rb == NULL || data == NULL || size == 0 || hdr == NULL ||
-        hdr->id >= 0xff || size_needed > rb->number_of_bytes) {
+        hdr->id >= 0xff || size_needed > rb->number_of_bytes ||
+        size > RB_MAX_APPEND_SIZE) {
         return RB_BAD_CALLER_DATA;
     }
     uint32_t blank_cnt = sector_blank_scan(rb);

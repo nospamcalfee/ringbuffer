@@ -125,7 +125,8 @@ static inline void set_crc (rb_sector_header *p, uint32_t n) { p->header = get_i
 #define HEADER_SIZE (sizeof(rb_header))
 //get highest legal value for len in rb_header
 #define RB_MAX_LEN_VALUE ((uint16_t) -1)
-
+//highest legal write size
+#define RB_MAX_APPEND_SIZE (FLASH_SECTOR_SIZE - sizeof(rb_sector_header) - sizeof(rb_header))
 //given a binary power, return the modulo2 mask of its value
 #define MOD_MASK(a) (a - 1)
 //if the flash erase sector is not binary, replace below with a % operation

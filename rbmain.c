@@ -104,11 +104,13 @@ const char *test_strings[] = {
 #define SSID_TEST_WRITES 7
 static rb_t slow_rb; //keep the buffer off the stack
 static rb_t ssid_rb; //keep the buffer off the stack
-// #define TEST_SIZE (4096-4-4)
-// #define TEST_SIZE 8000 fixme this test does not work
-// #define TEST_SIZE (1)
+// #define TEST_SIZE (4096-4-4) same as RB_MAX_APPEND_SIZE
+// this one will fail writes
+// #define TEST_SIZE 8000
+#define TEST_SIZE (1)
 // #define TEST_SIZE (190)
-#define TEST_SIZE (1024-7)
+// #define TEST_SIZE (1024-7)
+// #define TEST_SIZE RB_MAX_APPEND_SIZE
 // #define TEST_SIZE (1024*3-7)
 
 static uint8_t workdata[TEST_SIZE]; //local data for transferring

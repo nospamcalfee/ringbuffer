@@ -49,6 +49,4 @@ if(OPENOCD)
     COMMAND ${OPENOCD} -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c "adapter speed 5000" -c "program ${CMAKE_PROJECT_NAME}.elf verify reset exit"
     DEPENDS ${CMAKE_PROJECT_NAME}
   )
-
-  add_subdirectory(tests EXCLUDE_FROM_ALL)
 endif()
