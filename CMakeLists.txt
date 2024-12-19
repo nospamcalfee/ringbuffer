@@ -1,8 +1,13 @@
 cmake_minimum_required(VERSION 3.13...3.27)
 
-if(NOT PICO_SDK_PATH)
-  set(PICO_SDK_PATH ${CMAKE_CURRENT_LIST_DIR}/lib/pico-sdk)
+if(NOT $ENV{PICO_SDK_PATH})
+#  set(PICO_SDK_PATH ${CMAKE_CURRENT_LIST_DIR}/lib/pico-sdk)
+   message(" you must have pico sdk and environment PICO_SDK_PATH defined")
 endif()
+set(PICO_SDK_PATH $ENV{PICO_SDK_PATH})
+
+message(PICO_SDK_PATH="${PICO_SDK_PATH}")
+
 include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
 set(PROGRAM_NAME ringbuffer)

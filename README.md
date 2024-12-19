@@ -81,9 +81,9 @@ Your mileage may vary.
 
 ## Build and Install
 
+This now assumes you have the pico-sdk installed and have defined in your environment PICO_SDK_PATH
+
 ```bash
-git submodule update --init
-cd lib/pico-sdk; git submodule update --init; cd ../../
 mkdir build; cd build
 cmake ..
 make

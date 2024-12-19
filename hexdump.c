@@ -76,7 +76,7 @@ int hexdump(FILE *fd, void const *data, size_t length, int linelen, int split)
 	 *
 	 *	(hex = 3 chars, ascii = 1 char) * linelen number of chars
 	 */
-	assert(sizeof(buffer) >= (3 + (4 * (linelen / split)) + (linelen * 4)));
+	assert(sizeof(buffer) >= (unsigned int)(3 + (4 * (linelen / split)) + (linelen * 4)));
 
 	/*
 	 *	Loop through each line remaining
