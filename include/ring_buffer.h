@@ -158,7 +158,7 @@ typedef struct {
     uint8_t *rb_page; //only required for writes.
 } rb_t;
 
-typedef enum {
+enum rberrors {
     RB_OK = 0,
     RB_BAD_CALLER_DATA,
     RB_BAD_SECTOR,
@@ -168,7 +168,9 @@ typedef enum {
     RB_HDR_LOOP,
     RB_HDR_ID_NOT_FOUND,
     RB_FULL,
-} rb_errors_t;
+};
+
+typedef int8_t rb_errors_t;
 
 //define initialize choices
 enum init_choices {
