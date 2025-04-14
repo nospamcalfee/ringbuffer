@@ -78,6 +78,9 @@ This code works for me (so far) your code will need testing.
 
 Your mileage may vary.
 
+I have added a couple of higher level user routines as examples for usage. I
+changed the API so all functions return a negative error code, or zero if ok,
+or greater than zero if the function returns.
 
 ## Build and Install
 

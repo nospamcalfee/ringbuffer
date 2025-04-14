@@ -158,19 +158,18 @@ typedef struct {
     uint8_t *rb_page; //only required for writes.
 } rb_t;
 
-enum rberrors {
+typedef enum rberrors {
     RB_OK = 0,
-    RB_BAD_CALLER_DATA,
-    RB_BAD_SECTOR,
-    RB_BLANK_HDR,
-    RB_BAD_HDR,
-    RB_WRAPPED_SECTOR_USED = 5,
-    RB_HDR_LOOP,
-    RB_HDR_ID_NOT_FOUND,
-    RB_FULL,
-};
-
-typedef int8_t rb_errors_t;
+    RB_BAD_CALLER_DATA = -1,
+    RB_BAD_SECTOR = -2, //is this needed?
+    RB_BLANK_HDR = -3,
+    RB_BAD_HDR = -4,
+    RB_WRAPPED_SECTOR_USED = -5,
+    RB_HDR_LOOP = -6,
+    RB_HDR_ID_NOT_FOUND = -7,
+    RB_FULL = -8,
+    RB_REALLY_BIG_VALUE = 1<<17
+} rb_errors_t;
 
 //define initialize choices
 enum init_choices {
