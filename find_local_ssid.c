@@ -167,6 +167,7 @@ struct my_scan_result *scan_find_best_ap(char *password){
             rb_errors_t  err = flash_io_find_matching_ssid(best->res.ssid, password);
             if (err < 0) {
                 best= NULL;
+                continue; //no match in flash, keep looking at ssid lists
             } else {
                 break; //found best and a flash match
             }

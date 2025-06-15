@@ -146,6 +146,10 @@ rb_errors_t flash_io_erase_redundant_ssids(char *ss) {
         terr = rb_find(&rb, SSID_ID, ss, sslen, pagebuff); //find first copy of ssid
         if (terr < 0) {
             //some error
+            if (terr == RB_BLANK_HDR || terr == RB_HDR_ID_NOT_FOUND) {
+                //this means we could not find even one entry, so it is a new ssid
+                return RB_OK;
+            }
             printf("some flash_io_erase_redundant_ssids find failure %d looking for \"%s\"\n", terr, ss);
             break; //exit loop on failure
         } else {
